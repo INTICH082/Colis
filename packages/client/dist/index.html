@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Colis — Сетевой симулятор расстановки товаров (Three.js + Rapier3D)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --panel-bg: rgba(15, 23, 42, 0.85);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+      --accent-hover: #059669;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text-main);
+    }
+
+    #game-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      display: block;
+    }
+
+    /* HUD Header */
+    .hud-top {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .hud-panel {
+      background: var(--panel-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      pointer-events: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    }
+
+    .brand-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #3b82f6, #10b981);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .stat-chip {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+
+    .stat-value.money {
+      color: #4ade80;
+    }
+
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-accent {
+      background: var(--accent);
+    }
+
+    .btn-accent:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Crosshair & Interaction Prompt */
+    .crosshair-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 10;
+    }
+
+    .crosshair-dot {
+      width: 10px;
+      height: 10px;
+      background-color: rgba(255, 255, 255, 0.9);
+      border: 2px solid rgba(0, 0, 0, 0.4);
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+      transition: transform 0.15s ease;
+    }
+
+    .crosshair-container.interactive .crosshair-dot {
+      transform: scale(1.6);
+      background-color: #38bdf8;
+    }
+
+    .interaction-prompt {
+      background: var(--panel-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      animation: fadeIn 0.2s ease-out;
+      white-space: nowrap;
+    }
+
+    .key-badge {
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Bottom HUD: Held Box and Controls */
+    .hud-bottom {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .held-box-card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: 12px;
+      padding: 12px 24px;
+      display: none;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      animation: slideUp 0.25s ease-out;
+    }
+
+    .held-box-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .held-box-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .held-box-name {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .held-box-progress {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .progress-bar-bg {
+      width: 140px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #10b981);
+      width: 100%;
+      transition: width 0.2s;
+    }
+
+    .held-box-count {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .controls-cheatsheet {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      padding: 6px 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .controls-cheatsheet span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Delivery Modal */
+    .modal-backdrop {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-window {
+      background: var(--bg-dark);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      width: 680px;
+      max-width: 92vw;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h2 {
+      font-size: 1.3rem;
+      font-weight: 800;
+    }
+
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.5rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .product-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    .product-card:hover {
+      border-color: var(--primary);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .product-card-title {
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .product-card-details {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .product-card-price {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #4ade80;
+    }
+
+    /* Notifications */
+    .notifications-container {
+      position: absolute;
+      top: 80px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    .notification-item {
+      background: var(--panel-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--panel-border);
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      animation: slideLeft 0.3s ease-out;
+      max-width: 320px;
+    }
+
+    .notification-item.success {
+      border-left-color: var(--accent);
+    }
+
+    .notification-item.error {
+      border-left-color: var(--danger);
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideLeft {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+  </style>
+  <script type="module" crossorigin src="/assets/index-n_0XPyjo.js"></script>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD Top Bar -->
+  <div class="hud-top">
+    <div class="hud-panel">
+      <div class="brand-badge">
+        <div class="brand-icon">📦</div>
+        <span>COLIS SIMULATOR</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-label">Казна магазина</span>
+        <span class="stat-value money" id="hud-money">$1,500.00</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-label">Сессия / Комната</span>
+        <span class="stat-value" id="hud-room">store-main</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-label">Онлайн</span>
+        <span class="stat-value" id="hud-players">1 чел.</span>
+      </div>
+    </div>
+
+    <div class="hud-panel">
+      <button class="btn btn-accent" id="btn-order-delivery">
+        🚚 Заказ поставки
+      </button>
+      <button class="btn" id="btn-change-room">
+        🚪 Сменить комнату
+      </button>
+    </div>
+  </div>
+
+  <!-- Center Crosshair & Context Prompts -->
+  <div class="crosshair-container" id="crosshair-box">
+    <div class="crosshair-dot"></div>
+    <div class="interaction-prompt" id="interaction-prompt">
+      <span class="key-badge">E</span> <span id="prompt-text">Взять коробку</span>
+    </div>
+  </div>
+
+  <!-- Bottom HUD -->
+  <div class="hud-bottom">
+    <div class="held-box-card" id="held-box-card">
+      <div class="held-box-info">
+        <span class="held-box-title">В руках коробка</span>
+        <span class="held-box-name" id="held-product-name">Sparkling Cola</span>
+        <div class="held-box-progress">
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="held-progress-fill"></div>
+          </div>
+          <span class="held-box-count" id="held-product-count">12 / 12</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <span class="key-badge">ЛКМ</span> выставить товар
+        <span class="key-badge">G</span> поставить на пол
+      </div>
+    </div>
+
+    <div class="controls-cheatsheet">
+      <span><span class="key-badge">WASD</span> Перемещение</span>
+      <span><span class="key-badge">Shift</span> Бег</span>
+      <span><span class="key-badge">Мышь</span> Наведение в изометрии</span>
+      <span><span class="key-badge">E</span> Взять коробку</span>
+      <span><span class="key-badge">R</span> Открыть коробку</span>
+      <span><span class="key-badge">ЛКМ</span> Выставить на полку</span>
+      <span><span class="key-badge">ПКМ</span> Забрать с полки</span>
+      <span><span class="key-badge">G</span> Бросить коробку</span>
+    </div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="notifications-container" id="notifications"></div>
+
+  <!-- Delivery Order Modal -->
+  <div class="modal-backdrop" id="delivery-modal">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h2>Поставка товаров от поставщиков</h2>
+        <button class="close-btn" id="modal-close-btn">&times;</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted)">
+        Заказанные коробки будут немедленно доставлены в зону разгрузки склада.
+      </p>
+      <div class="product-grid" id="delivery-product-grid"></div>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "name": "colis-supermarket-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production-ready networked store stocking simulator built with Three.js and Rapier3D",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev --workspace=@colis/server",
+    "dev:client": "npm run dev --workspace=@colis/client",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "keywords": [
+    "threejs",
+    "rapier3d",
+    "multiplayer",
+    "coop",
+    "simulator"
+  ],
+  "author": "",
+  "license": "MIT"
+}
