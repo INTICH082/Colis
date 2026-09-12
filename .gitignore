@@ -1,1 +1,74 @@
+# Dependencies (root and all workspace packages)
 node_modules/
+**/node_modules/
+.pnp/
+.pnp.js
+
+# Production build outputs
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+
+# Vite / Bundler cache
+.vite/
+**/.vite/
+.turbo/
+.parcel-cache/
+
+# TypeScript build info and emitted artifacts outside src
+*.tsbuildinfo
+packages/client/vite.config.js
+packages/client/vite.config.js.map
+packages/client/vite.config.d.ts
+packages/client/vite.config.d.ts.map
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# Environment variables & local configs
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs and Code Editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+*.sublime-project
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Temporary and test coverage
+coverage/
+.nyc_output/
+*.tmp
+*.temp
