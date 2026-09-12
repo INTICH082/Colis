@@ -152,6 +152,19 @@ class ColisGame {
         e.preventDefault();
       }
     });
+
+    // Notify server on browser tab close and disconnect cleanly
+    const handleTabClose = () => {
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/tab-closed');
+        }
+      } catch {}
+      this.network.disconnect();
+    };
+
+    window.addEventListener('beforeunload', handleTabClose);
+    window.addEventListener('pagehide', handleTabClose);
   }
 
   private setupUICallbacks(): void {
@@ -397,7 +410,7 @@ class ColisGame {
     };
 
     const newPos = this.physics.computePlayerMovement(desiredDelta);
-    if (newPos.y <= 0.001) {
+    if (newPos.y <= 0.05) {
       newPos.y = 0;
       this.isGrounded = true;
       if (this.verticalVelocity < 0) this.verticalVelocity = 0;
@@ -414,12 +427,15 @@ class ColisGame {
       this.localPlayerState.rotationY = Math.atan2(worldDir.x, worldDir.z) + Math.PI;
     }
 
+    // Player is only considered airborne when clearly elevated above floor
+    const isAirborne = !this.isGrounded && newPos.y > 0.15;
+
     // Sync visual player mesh and animations
     if (this.localPlayerEntity) {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
-      this.localPlayerEntity.tick(dt, isMoving, isSprinting, !this.isGrounded);
+      this.localPlayerEntity.tick(dt, isMoving, isSprinting, isAirborne);
     }
 
     // Send input to server at tick rate (~25Hz)

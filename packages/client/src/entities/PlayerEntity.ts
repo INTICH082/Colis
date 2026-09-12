@@ -150,22 +150,31 @@ export class PlayerEntity {
     this.group.add(mesh);
   }
 
-  public fadeToAnimation(animName: string, duration: number = 0.2): void {
+  public fadeToAnimation(animName: string, duration: number = 0.22): void {
     if (!this.mixer || this.currentActionName === animName) return;
 
-    const currentAction = this.actions.get(this.currentActionName);
+    const prevAction = this.actions.get(this.currentActionName);
     const nextAction = this.actions.get(animName);
 
     if (!nextAction) return;
 
-    nextAction.reset();
-    nextAction.fadeIn(duration);
-    nextAction.play();
-
-    if (currentAction) {
-      currentAction.fadeOut(duration);
+    // Jump should always start from frame 0 (liftoff).
+    // Looping animations (idle/walk/run) only reset if stopped or disabled,
+    // ensuring smooth motion continuity without popping or stuttering.
+    if (animName === 'jump' || !nextAction.isRunning() || !nextAction.enabled) {
+      nextAction.reset();
     }
 
+    nextAction.enabled = true;
+    nextAction.setEffectiveTimeScale(1);
+
+    if (prevAction && prevAction !== nextAction) {
+      prevAction.crossFadeTo(nextAction, duration, false);
+    } else {
+      nextAction.fadeIn(duration);
+    }
+
+    nextAction.play();
     this.currentActionName = animName;
   }
 
@@ -236,21 +245,21 @@ export class PlayerEntity {
   /**
    * Main tick for local player animation updates
    */
-  public tick(dt: number, isMoving: boolean, isSprinting: boolean, isJumping: boolean = false): void {
+  public tick(dt: number, isMoving: boolean, isSprinting: boolean, isAirborne: boolean = false): void {
     if (this.mixer) {
       this.mixer.update(dt);
     }
 
-    if (isJumping) {
-      this.fadeToAnimation('jump', 0.15);
+    if (isAirborne) {
+      this.fadeToAnimation('jump', 0.18);
     } else if (isMoving) {
       if (isSprinting) {
-        this.fadeToAnimation('run', 0.15);
+        this.fadeToAnimation('run', 0.22);
       } else {
-        this.fadeToAnimation('walk', 0.15);
+        this.fadeToAnimation('walk', 0.22);
       }
     } else {
-      this.fadeToAnimation('idle', 0.2);
+      this.fadeToAnimation('idle', 0.25);
     }
   }
 
@@ -273,10 +282,11 @@ export class PlayerEntity {
       const speed = distMoved / Math.max(dt, 0.001);
       this.lastPosition.copy(this.group.position);
 
-      const isMoving = speed > 0.2;
+      const isMoving = speed > 0.25;
       const isSprinting = speed > 5.2;
+      const isAirborne = this.group.position.y > 0.18;
 
-      this.tick(dt, isMoving, isSprinting, false);
+      this.tick(dt, isMoving, isSprinting, isAirborne);
     }
   }
 

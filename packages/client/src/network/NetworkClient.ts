@@ -32,6 +32,7 @@ export class NetworkClient {
   private callbacks: NetworkCallbacks;
   private inputSequence: number = 0;
   private isConnected: boolean = false;
+  private isIntentionallyClosed: boolean = false;
   private currentRoomId: string = 'store-main';
   private playerName: string = 'Работник';
 
@@ -43,6 +44,7 @@ export class NetworkClient {
   public connect(roomId: string = 'store-main', playerName?: string): void {
     this.currentRoomId = roomId;
     if (playerName) this.playerName = playerName;
+    this.isIntentionallyClosed = false;
 
     if (this.ws) {
       this.ws.close();
@@ -78,9 +80,11 @@ export class NetworkClient {
       this.ws.onclose = () => {
         this.isConnected = false;
         this.callbacks.onConnectionStatus(false);
+        if (this.isIntentionallyClosed) return;
+
         console.log('[Network] Disconnected. Reconnecting in 2s...');
         setTimeout(() => {
-          if (!this.isConnected) {
+          if (!this.isConnected && !this.isIntentionallyClosed) {
             this.connect(this.currentRoomId, this.playerName);
           }
         }, 2000);
@@ -91,6 +95,16 @@ export class NetworkClient {
       };
     } catch (err) {
       console.error('[Network] Connection failed:', err);
+    }
+  }
+
+  public disconnect(): void {
+    this.isIntentionallyClosed = true;
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
   }
 

@@ -55,6 +55,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/api/tab-closed' || req.url === '/api/client-disconnect') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    setTimeout(checkAutoShutdown, 300);
+    return;
+  }
+
   if (req.url === '/rooms') {
     const list = Array.from(rooms.values()).map(r => ({
       id: r.id,
@@ -114,7 +121,37 @@ const defaultRoomId = 'store-main';
 const defaultRoom = new StoreRoom(defaultRoomId, 'Супермаркет №1 (Кооператив)', 'system');
 rooms.set(defaultRoomId, defaultRoom);
 
+let hasHadClient = false;
+let shutdownTimer: NodeJS.Timeout | null = null;
+
+function checkAutoShutdown(): void {
+  if (!hasHadClient) return;
+
+  if (wss.clients.size === 0) {
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    console.log('[Server] No active clients connected. Auto-shutdown in 2.5s...');
+    shutdownTimer = setTimeout(() => {
+      if (wss.clients.size === 0) {
+        console.log('[Server] All browser tabs closed. Shutting down Colis server.');
+        process.exit(0);
+      }
+    }, 2500);
+  } else {
+    if (shutdownTimer) {
+      console.log('[Server] Client reconnected. Auto-shutdown cancelled.');
+      clearTimeout(shutdownTimer);
+      shutdownTimer = null;
+    }
+  }
+}
+
 wss.on('connection', (ws: WebSocket) => {
+  hasHadClient = true;
+  if (shutdownTimer) {
+    clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+  }
+
   const playerId = `p_${playerIdCounter++}_${Date.now().toString(36)}`;
 
   ws.on('message', (data: Buffer | string) => {
@@ -170,6 +207,7 @@ wss.on('connection', (ws: WebSocket) => {
       }
       clientToRoom.delete(ws);
     }
+    setTimeout(checkAutoShutdown, 100);
   });
 
   ws.on('error', (err) => {

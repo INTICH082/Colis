@@ -2,35 +2,14 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace ColisLauncher
 {
-    class Program
+    static class Program
     {
         private static Process serverProcess = null;
-
-        [DllImport("Kernel32")]
-        private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
-
-        private delegate bool EventHandler(CtrlType sig);
-        private static EventHandler exitHandler;
-
-        private enum CtrlType
-        {
-            CTRL_C_EVENT = 0,
-            CTRL_BREAK_EVENT = 1,
-            CTRL_CLOSE_EVENT = 2,
-            CTRL_LOGOFF_EVENT = 5,
-            CTRL_SHUTDOWN_EVENT = 6
-        }
-
-        private static bool Handler(CtrlType sig)
-        {
-            KillServer();
-            return true;
-        }
 
         private static void KillServer()
         {
@@ -54,154 +33,94 @@ namespace ColisLauncher
             }
         }
 
+        [STAThread]
         static void Main(string[] args)
         {
-            Console.Title = "Colis - Supermarket Simulator 3D";
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
-
-            exitHandler += new EventHandler(Handler);
-            SetConsoleCtrlHandler(exitHandler, true);
             AppDomain.CurrentDomain.ProcessExit += (s, e) => KillServer();
-
-            PrintHeader();
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             Directory.SetCurrentDirectory(baseDir);
 
-            // 1. Check Node.js
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.Write("[1/4] Проверка Node.js... ");
+            // 1. Verify Node.js
             if (!CheckCommand("node", "-v"))
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("НЕ НАЙДЕН!");
-                Console.WriteLine("\n[ОШИБКА] Для работы игры необходим Node.js (v18+).");
-                Console.WriteLine("Пожалуйста, установите его с официального сайта: https://nodejs.org");
-                Console.ResetColor();
-                Console.WriteLine("\nНажмите любую клавишу для выхода...");
-                Console.ReadKey();
+                MessageBox.Show(
+                    "Для работы игры необходим установленный Node.js (v18+).\n\nПожалуйста, установите его с официального сайта: https://nodejs.org",
+                    "Colis - Не найден Node.js",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
                 return;
             }
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("OK");
 
-            // 2. Check dependencies
+            // 2. Check dependencies (npm install if missing)
             if (!Directory.Exists(Path.Combine(baseDir, "node_modules")))
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("[2/4] Установка зависимостей (npm install)... Это займет немного времени.");
-                Console.ResetColor();
                 RunCmd("npm.cmd", "install", baseDir);
             }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("[2/4] Зависимости проверены: OK");
-            }
 
-            // 3. Check build
+            // 3. Check client build (npm run build if missing)
             string distHtml = Path.Combine(baseDir, "packages", "client", "dist", "index.html");
             string serverJs = Path.Combine(baseDir, "packages", "server", "dist", "server.js");
 
             if (!File.Exists(distHtml) || !File.Exists(serverJs))
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("[3/4] Сборка проекта (npm run build)...");
-                Console.ResetColor();
                 RunCmd("npm.cmd", "run build", baseDir);
             }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("[3/4] Сборка проверена: OK");
-            }
 
-            // 4. Start Server
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("[4/4] Запуск игрового сервера на http://localhost:8080...");
-            Console.ResetColor();
-
+            // 4. Start Server silently without console window
             ProcessStartInfo psi = new ProcessStartInfo
             {
                 FileName = "node",
                 Arguments = "packages/server/dist/server.js",
                 WorkingDirectory = baseDir,
                 UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
                 CreateNoWindow = true
             };
 
-            serverProcess = Process.Start(psi);
-            if (serverProcess == null)
+            try
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[ОШИБКА] Не удалось запустить сервер.");
-                Console.ResetColor();
-                Console.ReadKey();
+                serverProcess = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Ошибка запуска сервера игры:\n" + ex.Message,
+                    "Colis",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
                 return;
             }
 
-            serverProcess.OutputDataReceived += (s, e) =>
-            {
-                if (!string.IsNullOrEmpty(e.Data))
-                    Console.WriteLine("  [Server] " + e.Data);
-            };
-            serverProcess.ErrorDataReceived += (s, e) =>
-            {
-                if (!string.IsNullOrEmpty(e.Data))
-                    Console.WriteLine("  [Server Error] " + e.Data);
-            };
-            serverProcess.BeginOutputReadLine();
-            serverProcess.BeginErrorReadLine();
-
-            // Wait for port 8080 to become active
-            bool ready = WaitForPort(8080, 10000);
+            // 5. Wait for server port 8080 to become active
+            bool ready = WaitForPort(8080, 15000);
             if (ready)
             {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("\n[УСПЕХ] Игра запущена!");
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("Ссылка: http://localhost:8080");
-                Console.WriteLine("Открытие игры в браузере...");
-                Console.ResetColor();
-
+                // Open default browser
                 try
                 {
                     Process.Start(new ProcessStartInfo("http://localhost:8080") { UseShellExecute = true });
                 }
                 catch { }
 
-                Console.WriteLine("\n" + new string('-', 60));
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Кооператив с другом:");
-                Console.WriteLine("Друг может подключиться в браузере по адресу: http://<ВАШ_IP>:8080");
-                Console.WriteLine("(через локальную сеть, Radmin VPN, Hamachi или ZeroTier)");
-                Console.ResetColor();
-                Console.WriteLine(new string('-', 60));
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine("Нажмите [Q] или закройте это окно для завершения игры...");
-                Console.ResetColor();
-
-                while (!serverProcess.HasExited)
+                // Wait until the server process exits (e.g. when user closes browser tab)
+                if (serverProcess != null)
                 {
-                    if (Console.KeyAvailable)
-                    {
-                        var key = Console.ReadKey(true);
-                        if (key.Key == ConsoleKey.Q || key.Key == ConsoleKey.Escape)
-                            break;
-                    }
-                    Thread.Sleep(200);
+                    serverProcess.WaitForExit();
                 }
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[ВНИМАНИЕ] Сервер не ответил вовремя.");
-                Console.ResetColor();
+                KillServer();
+                MessageBox.Show(
+                    "Игровой сервер не ответил вовремя. Попробуйте запустить еще раз.",
+                    "Colis",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
             }
 
-            Console.WriteLine("Остановка сервера...");
             KillServer();
         }
 
@@ -216,7 +135,7 @@ namespace ColisLauncher
                     CreateNoWindow = true,
                     UseShellExecute = false
                 });
-                p.WaitForExit(3000);
+                p.WaitForExit(4000);
                 return p.ExitCode == 0;
             }
             catch
@@ -234,14 +153,12 @@ namespace ColisLauncher
                     FileName = "cmd.exe",
                     Arguments = "/c " + cmd + " " + args,
                     WorkingDirectory = workDir,
+                    CreateNoWindow = true,
                     UseShellExecute = false
                 });
                 p.WaitForExit();
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("[Ошибка запуска команды] " + ex.Message);
-            }
+            catch { }
         }
 
         private static bool WaitForPort(int port, int timeoutMs)
@@ -262,21 +179,10 @@ namespace ColisLauncher
                     }
                 }
                 catch { }
-                Thread.Sleep(300);
-                elapsed += 300;
+                Thread.Sleep(250);
+                elapsed += 250;
             }
             return false;
-        }
-
-        private static void PrintHeader()
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(@"
-  ======================================================
-             COLIS - SUPERMARKET SIMULATOR 3D
-  ======================================================
-");
-            Console.ResetColor();
         }
     }
 }

@@ -116,7 +116,7 @@ export class PhysicsWorld {
 
   public isGrounded(): boolean {
     if (!this.isReady) return true;
-    return this.characterController.computedGrounded() || this.playerBody.translation().y <= 0.02;
+    return this.characterController.computedGrounded() || this.playerBody.translation().y <= 0.05;
   }
 
   public teleportPlayer(pos: Vector3D): void {
