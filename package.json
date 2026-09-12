@@ -12,6 +12,7 @@
     "dev:server": "npm run dev --workspace=@colis/server",
     "dev:client": "npm run dev --workspace=@colis/client",
     "build": "npm run build --workspace=@colis/shared && npm run build --workspace=@colis/server && npm run build --workspace=@colis/client",
+    "build:launcher": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:exe /optimize+ /out:Colis.exe tools\\launcher\\Program.cs",
     "lint": "npm run lint --workspaces --if-present"
   },
   "keywords": [

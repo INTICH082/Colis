@@ -3,6 +3,31 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { ClientMessage, ClientOpCode, ServerOpCode, ServerMessage } from '@colis/shared';
 import { StoreRoom } from './rooms/StoreRoom.js';
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.wasm': 'application/wasm',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
+
 const PORT = Number(process.env.PORT) || 8080;
 
 const server = http.createServer((req, res) => {
@@ -38,6 +63,37 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(list));
     return;
+  }
+
+  // Serve static client assets from packages/client/dist
+  if ((req.method === 'GET' || req.method === 'HEAD') && fs.existsSync(CLIENT_DIST)) {
+    let reqPath = req.url ? req.url.split('?')[0] : '/';
+    if (reqPath === '/') reqPath = '/index.html';
+
+    let filePath = path.join(CLIENT_DIST, reqPath);
+    if (filePath.startsWith(CLIENT_DIST) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': contentType });
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(filePath).pipe(res);
+      }
+      return;
+    }
+
+    // SPA fallback to index.html for other routes
+    const indexPath = path.join(CLIENT_DIST, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(indexPath).pipe(res);
+      }
+      return;
+    }
   }
 
   res.writeHead(404);
