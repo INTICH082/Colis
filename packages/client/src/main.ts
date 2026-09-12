@@ -153,6 +153,19 @@ class ColisGame {
       }
     });
 
+    // Reset all pressed keys when window loses/gains focus or tab is hidden
+    const clearKeys = () => {
+      this.keys = {};
+    };
+
+    window.addEventListener('blur', clearKeys);
+    window.addEventListener('focus', clearKeys);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearKeys();
+      }
+    });
+
     // Notify server on browser tab close and disconnect cleanly
     const handleTabClose = () => {
       try {
