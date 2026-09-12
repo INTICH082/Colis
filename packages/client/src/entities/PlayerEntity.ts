@@ -1,19 +1,80 @@
 import * as THREE from 'three';
-import { PlayerState, PRODUCTS } from '@colis/shared';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { PlayerState } from '@colis/shared';
+
+interface LoadedCharacterAssets {
+  scene: THREE.Group;
+  animations: THREE.AnimationClip[];
+}
 
 export class PlayerEntity {
+  private static cachedAssets: LoadedCharacterAssets | null = null;
+  private static loadPromise: Promise<LoadedCharacterAssets> | null = null;
+
   public id: string;
   public group: THREE.Group;
-  private bodyMesh!: THREE.Mesh;
-  private headMesh!: THREE.Mesh;
+  private modelRoot: THREE.Group | null = null;
+  private mixer: THREE.AnimationMixer | null = null;
+  private actions: Map<string, THREE.AnimationAction> = new Map();
+  private currentActionName: string = 'idle';
+
   private nameSprite!: THREE.Sprite;
   private heldBoxMesh!: THREE.Group;
-  private heldBoxFlaps: THREE.Mesh[] = [];
   private heldBoxItemsGroup!: THREE.Group;
 
   private targetPosition: THREE.Vector3 = new THREE.Vector3();
+  private lastPosition: THREE.Vector3 = new THREE.Vector3();
   private targetRotationY: number = 0;
-  private walkCycle: number = 0;
+
+  /**
+   * Preloads character 3D model and animations once for all players.
+   */
+  public static async loadAssets(): Promise<LoadedCharacterAssets> {
+    if (this.cachedAssets) return this.cachedAssets;
+    if (this.loadPromise) return this.loadPromise;
+
+    this.loadPromise = new Promise<LoadedCharacterAssets>((resolve, reject) => {
+      const loader = new GLTFLoader();
+      loader.load(
+        '/models/characters/colis.glb',
+        (gltf) => {
+          // Configure textures and shadows
+          gltf.scene.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+              const mesh = child as THREE.Mesh;
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              if (mat && mat.map) {
+                // Pixelated texture filtering for clean Blockbench look
+                mat.map.magFilter = THREE.NearestFilter;
+                mat.map.minFilter = THREE.NearestMipmapLinearFilter;
+                mat.map.needsUpdate = true;
+              }
+            }
+          });
+
+          PlayerEntity.cachedAssets = {
+            scene: gltf.scene,
+            animations: gltf.animations,
+          };
+          console.log(`[PlayerEntity] Loaded character GLB with ${gltf.animations.length} animations:`,
+            gltf.animations.map(a => a.name)
+          );
+          resolve(PlayerEntity.cachedAssets);
+        },
+        undefined,
+        (err) => {
+          console.warn('[PlayerEntity] Failed to load colis.glb, fallback will be used:', err);
+          reject(err);
+        }
+      );
+    });
+
+    return this.loadPromise;
+  }
 
   constructor(state: PlayerState, isLocal: boolean) {
     this.id = state.id;
@@ -21,57 +82,89 @@ export class PlayerEntity {
     this.group.position.set(state.position.x, state.position.y, state.position.z);
     this.group.rotation.y = state.rotationY;
     this.targetPosition.copy(this.group.position);
+    this.lastPosition.copy(this.group.position);
 
-    // Build stylized store employee model
-    const playerColor = new THREE.Color(state.color || '#3b82f6');
+    // 1. Attach 3D Model & Animations
+    this.setupCharacterModel();
 
-    // 1. Torso (Uniform Vest)
-    const bodyGeo = new THREE.CylinderGeometry(0.28, 0.24, 0.75, 12);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: playerColor,
-      roughness: 0.5,
-      metalness: 0.1,
-    });
-    this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    this.bodyMesh.position.y = 0.85;
-    this.bodyMesh.castShadow = true;
-    this.bodyMesh.receiveShadow = true;
-    this.group.add(this.bodyMesh);
-
-    // 2. Head
-    const headGeo = new THREE.SphereGeometry(0.2, 16, 16);
-    const skinMat = new THREE.MeshStandardMaterial({
-      color: 0xffdfba,
-      roughness: 0.6,
-    });
-    this.headMesh = new THREE.Mesh(headGeo, skinMat);
-    this.headMesh.position.y = 1.45;
-    this.headMesh.castShadow = true;
-    this.group.add(this.headMesh);
-
-    // Employee cap / visor
-    const capGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.08, 16);
-    const capMat = new THREE.MeshStandardMaterial({ color: playerColor });
-    const cap = new THREE.Mesh(capGeo, capMat);
-    cap.position.y = 1.6;
-    this.group.add(cap);
-
-    // Visor brim pointing forward (-Z)
-    const brimGeo = new THREE.BoxGeometry(0.24, 0.02, 0.15);
-    const brim = new THREE.Mesh(brimGeo, capMat);
-    brim.position.set(0, 1.58, -0.22);
-    this.group.add(brim);
-
-    // 3. Hands / Held item anchor
+    // 2. Hands / Held item anchor
     this.heldBoxMesh = this.buildHeldBox();
-    this.heldBoxMesh.position.set(0, 0.95, -0.6);
+    this.heldBoxMesh.position.set(0, 0.75, 0.45);
     this.heldBoxMesh.visible = false;
     this.group.add(this.heldBoxMesh);
 
-    // 4. Name Tag Billboard Sprite
+    // 3. Name Tag Billboard Sprite
     this.nameSprite = this.createNameSprite(state.name, state.color, isLocal);
-    this.nameSprite.position.set(0, 2.0, 0);
+    this.nameSprite.position.set(0, 1.95, 0);
     this.group.add(this.nameSprite);
+  }
+
+  private setupCharacterModel(): void {
+    if (PlayerEntity.cachedAssets) {
+      this.attachLoadedModel(PlayerEntity.cachedAssets);
+    } else {
+      // Lazy load if not already loaded
+      PlayerEntity.loadAssets()
+        .then((assets) => this.attachLoadedModel(assets))
+        .catch(() => this.buildFallbackGeometry());
+    }
+  }
+
+  private attachLoadedModel(assets: LoadedCharacterAssets): void {
+    if (this.modelRoot) return;
+
+    // Clone skinned mesh and skeleton safely
+    this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
+    this.modelRoot.position.set(0, 0, 0);
+    this.group.add(this.modelRoot);
+
+    // Setup animation mixer
+    this.mixer = new THREE.AnimationMixer(this.modelRoot);
+    assets.animations.forEach((clip) => {
+      const action = this.mixer!.clipAction(clip);
+      if (clip.name === 'jump') {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      } else {
+        action.setLoop(THREE.LoopRepeat, Infinity);
+      }
+      this.actions.set(clip.name, action);
+    });
+
+    // Start with idle
+    const idleAction = this.actions.get('idle');
+    if (idleAction) {
+      idleAction.play();
+      this.currentActionName = 'idle';
+    }
+  }
+
+  private buildFallbackGeometry(): void {
+    if (this.modelRoot) return;
+    const bodyGeo = new THREE.CylinderGeometry(0.25, 0.22, 0.9, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+    const mesh = new THREE.Mesh(bodyGeo, bodyMat);
+    mesh.position.y = 0.85;
+    this.group.add(mesh);
+  }
+
+  public fadeToAnimation(animName: string, duration: number = 0.2): void {
+    if (!this.mixer || this.currentActionName === animName) return;
+
+    const currentAction = this.actions.get(this.currentActionName);
+    const nextAction = this.actions.get(animName);
+
+    if (!nextAction) return;
+
+    nextAction.reset();
+    nextAction.fadeIn(duration);
+    nextAction.play();
+
+    if (currentAction) {
+      currentAction.fadeOut(duration);
+    }
+
+    this.currentActionName = animName;
   }
 
   private createNameSprite(name: string, color: string, isLocal: boolean): THREE.Sprite {
@@ -103,7 +196,6 @@ export class PlayerEntity {
   private buildHeldBox(): THREE.Group {
     const boxGroup = new THREE.Group();
 
-    // Cardboard texture / material
     const cardboardMat = new THREE.MeshStandardMaterial({
       color: 0xcd853f,
       roughness: 0.85,
@@ -113,13 +205,11 @@ export class PlayerEntity {
     const boxH = 0.32;
     const boxD = 0.35;
 
-    // Box body
     const body = new THREE.Mesh(new THREE.BoxGeometry(boxW, boxH, boxD), cardboardMat);
     body.castShadow = true;
     body.receiveShadow = true;
     boxGroup.add(body);
 
-    // Group for preview of goods inside
     this.heldBoxItemsGroup = new THREE.Group();
     this.heldBoxItemsGroup.position.set(0, 0.05, 0);
     boxGroup.add(this.heldBoxItemsGroup);
@@ -141,30 +231,50 @@ export class PlayerEntity {
     }
   }
 
+  /**
+   * Main tick for local player animation updates
+   */
+  public tick(dt: number, isMoving: boolean, isSprinting: boolean, isJumping: boolean = false): void {
+    if (this.mixer) {
+      this.mixer.update(dt);
+    }
+
+    if (isJumping) {
+      this.fadeToAnimation('jump', 0.15);
+    } else if (isMoving) {
+      if (isSprinting) {
+        this.fadeToAnimation('run', 0.15);
+      } else {
+        this.fadeToAnimation('walk', 0.15);
+      }
+    } else {
+      this.fadeToAnimation('idle', 0.2);
+    }
+  }
+
+  /**
+   * Interpolation and animation update for remote multiplayer players
+   */
   public tickInterpolation(dt: number, isLocal: boolean): void {
     if (!isLocal) {
       // Smooth lerp for remote players
       this.group.position.lerp(this.targetPosition, 15 * dt);
 
-      // Slerp angle
+      // Slerp rotation angle
       let diff = this.targetRotationY - this.group.rotation.y;
       while (diff < -Math.PI) diff += Math.PI * 2;
       while (diff > Math.PI) diff -= Math.PI * 2;
       this.group.rotation.y += diff * 15 * dt;
-    }
 
-    // Walking bob animation
-    const isMoving = isLocal
-      ? false
-      : this.group.position.distanceTo(this.targetPosition) > 0.05;
+      // Determine movement state from velocity
+      const distMoved = this.group.position.distanceTo(this.lastPosition);
+      const speed = distMoved / Math.max(dt, 0.001);
+      this.lastPosition.copy(this.group.position);
 
-    if (isMoving) {
-      this.walkCycle += dt * 10;
-      this.bodyMesh.position.y = 0.85 + Math.sin(this.walkCycle * 2) * 0.04;
-      this.headMesh.position.y = 1.45 + Math.sin(this.walkCycle * 2) * 0.03;
-    } else {
-      this.bodyMesh.position.y = 0.85;
-      this.headMesh.position.y = 1.45;
+      const isMoving = speed > 0.2;
+      const isSprinting = speed > 5.2;
+
+      this.tick(dt, isMoving, isSprinting, false);
     }
   }
 

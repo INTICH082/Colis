@@ -94,7 +94,12 @@ class ColisGame {
   public async start(): Promise<void> {
     console.log('[ColisGame] Initializing Rapier3D physics engine...');
     await this.physics.init();
-    console.log('[ColisGame] Physics ready. Connecting to multiplayer server...');
+    console.log('[ColisGame] Loading 3D character model and animations...');
+    await PlayerEntity.loadAssets().catch((err) => {
+      console.warn('[ColisGame] Failed to preload character model:', err);
+    });
+
+    console.log('[ColisGame] Physics and models ready. Connecting to multiplayer server...');
 
     // Ask user for their name if first time
     const savedName = localStorage.getItem('colis_player_name') || `Работник #${Math.floor(Math.random() * 900 + 100)}`;
@@ -391,11 +396,12 @@ class ColisGame {
       this.localPlayerState.rotationY = Math.atan2(worldDir.x, worldDir.z) + Math.PI;
     }
 
-    // Sync visual player mesh
+    // Sync visual player mesh and animations
     if (this.localPlayerEntity) {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
+      this.localPlayerEntity.tick(dt, isMoving, isSprinting, this.localPlayerState.position.y > 0.3);
     }
 
     // Send input to server at tick rate (~25Hz)
