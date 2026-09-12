@@ -77,3 +77,8 @@ coverage/
 *.blend1
 *.blend2
 *.blend@
+
+# Personal local asset inbox (files dropped here won't be committed)
+assets_inbox/*
+!assets_inbox/.gitkeep
+!assets_inbox/README.md
