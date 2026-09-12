@@ -101,7 +101,12 @@ class ColisGame {
       console.warn('[ColisGame] Failed to preload character model:', err);
     });
 
-    console.log('[ColisGame] Physics and models ready. Connecting to multiplayer server...');
+    console.log('[ColisGame] Waiting for fonts to load...');
+    if (document.fonts) {
+      await document.fonts.ready;
+    }
+
+    console.log('[ColisGame] Physics, models and fonts ready. Connecting to multiplayer server...');
 
     // Ask user for their name if first time
     const savedName = localStorage.getItem('colis_player_name') || `Работник #${Math.floor(Math.random() * 900 + 100)}`;

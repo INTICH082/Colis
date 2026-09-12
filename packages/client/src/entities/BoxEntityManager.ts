@@ -85,7 +85,7 @@ export class BoxEntityManager {
     ctx.fillStyle = product.color;
     ctx.fillRect(0, 0, 256, 128);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px Inter, sans-serif';
+    ctx.font = 'bold 28px "Handgeschrieben", cursive, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(product.name, 128, 64);

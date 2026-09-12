@@ -192,7 +192,7 @@ export class PlayerEntity {
     ctx.stroke();
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 22px Inter, sans-serif';
+    ctx.font = 'bold 26px "Handgeschrieben", cursive, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(isLocal ? `${name} (Вы)` : name, 128, 32);

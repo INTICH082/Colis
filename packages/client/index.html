@@ -7,7 +7,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/ui/fonts/Handgeschrieben-Regular.otf" as="font" type="font/otf" crossorigin>
   <style>
+    @font-face {
+      font-family: 'Handgeschrieben';
+      src: url('/ui/fonts/Handgeschrieben-Regular.otf') format('opentype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+
     :root {
       --bg-dark: #0f172a;
       --panel-bg: rgba(15, 23, 42, 0.85);
@@ -34,8 +43,13 @@
       height: 100%;
       overflow: hidden;
       background-color: var(--bg-dark);
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-family: 'Handgeschrieben', cursive, -apple-system, sans-serif;
+      font-size: 18px;
       color: var(--text-main);
+    }
+
+    button, input, select, textarea {
+      font-family: 'Handgeschrieben', cursive, -apple-system, sans-serif;
     }
 
     #game-canvas {
@@ -108,8 +122,8 @@
     }
 
     .stat-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1rem;
+      font-family: 'Handgeschrieben', cursive, sans-serif;
+      font-size: 1.15rem;
       font-weight: 700;
       color: #38bdf8;
     }
@@ -186,8 +200,8 @@
       border: 1px solid rgba(255, 255, 255, 0.4);
       border-radius: 4px;
       padding: 2px 6px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
+      font-family: 'Handgeschrieben', cursive, sans-serif;
+      font-size: 0.85rem;
       font-weight: 700;
       color: #fff;
     }
@@ -260,9 +274,9 @@
     }
 
     .held-box-count {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Handgeschrieben', cursive, sans-serif;
       font-weight: 700;
-      font-size: 0.9rem;
+      font-size: 1.05rem;
     }
 
     .controls-cheatsheet {
@@ -370,8 +384,8 @@
     }
 
     .product-card-price {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.95rem;
+      font-family: 'Handgeschrieben', cursive, sans-serif;
+      font-size: 1.15rem;
       font-weight: 700;
       color: #4ade80;
     }

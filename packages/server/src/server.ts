@@ -28,6 +28,7 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
 };
 
 const PORT = Number(process.env.PORT) || 8080;
