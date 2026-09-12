@@ -87,9 +87,9 @@ export class PlayerEntity {
     // 1. Attach 3D Model & Animations
     this.setupCharacterModel();
 
-    // 2. Hands / Held item anchor
+    // 2. Hands / Held item anchor (in front of employee)
     this.heldBoxMesh = this.buildHeldBox();
-    this.heldBoxMesh.position.set(0, 0.75, 0.45);
+    this.heldBoxMesh.position.set(0, 0.75, -0.45);
     this.heldBoxMesh.visible = false;
     this.group.add(this.heldBoxMesh);
 
@@ -116,6 +116,8 @@ export class PlayerEntity {
     // Clone skinned mesh and skeleton safely
     this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
     this.modelRoot.position.set(0, 0, 0);
+    // Rotate 180 degrees to face forward properly with movement and aim
+    this.modelRoot.rotation.y = Math.PI;
     this.group.add(this.modelRoot);
 
     // Setup animation mixer

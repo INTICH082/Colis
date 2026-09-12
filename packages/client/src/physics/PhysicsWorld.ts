@@ -91,6 +91,13 @@ export class PhysicsWorld {
   public computePlayerMovement(desiredMovement: Vector3D): Vector3D {
     if (!this.isReady) return desiredMovement;
 
+    // When jumping upwards, disable ground snapping so jump impulse is clean
+    if (desiredMovement.y > 0.05) {
+      this.characterController.disableSnapToGround();
+    } else {
+      this.characterController.enableSnapToGround(0.15);
+    }
+
     this.characterController.computeColliderMovement(this.playerCollider, desiredMovement);
     const correctedMovement = this.characterController.computedMovement();
 
@@ -105,6 +112,11 @@ export class PhysicsWorld {
     this.world.step();
 
     return newPos;
+  }
+
+  public isGrounded(): boolean {
+    if (!this.isReady) return true;
+    return this.characterController.computedGrounded() || this.playerBody.translation().y <= 0.02;
   }
 
   public teleportPlayer(pos: Vector3D): void {

@@ -8,9 +8,13 @@ export class GameRenderer {
   public raycaster: THREE.Raycaster;
   public mousePos: THREE.Vector2;
 
-  // Isometric camera offsets
+  // Isometric camera offsets & gentle zoom controls
   private cameraOffset = new THREE.Vector3(10, 13, 10);
   private currentCameraTarget = new THREE.Vector3(0, 0, 7);
+  private zoomFactor: number = 1.0;
+  private targetZoomFactor: number = 1.0;
+  private readonly minZoom: number = 0.75;
+  private readonly maxZoom: number = 1.35;
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -65,6 +69,7 @@ export class GameRenderer {
 
     window.addEventListener('resize', this.onResize);
     window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('wheel', this.onWheel, { passive: true });
   }
 
   private onResize = (): void => {
@@ -78,7 +83,24 @@ export class GameRenderer {
     this.mousePos.y = -(e.clientY / window.innerHeight) * 2 + 1;
   };
 
+  private onWheel = (e: WheelEvent): void => {
+    // Gentle zoom in/out with clamp
+    this.targetZoomFactor += e.deltaY * 0.0008;
+    this.targetZoomFactor = THREE.MathUtils.clamp(
+      this.targetZoomFactor,
+      this.minZoom,
+      this.maxZoom
+    );
+  };
+
   public updateCamera(targetPos: THREE.Vector3, dt: number): void {
+    // Smooth zoom interpolation
+    this.zoomFactor = THREE.MathUtils.lerp(
+      this.zoomFactor,
+      this.targetZoomFactor,
+      Math.min(1, 10 * dt)
+    );
+
     // Smooth camera target following
     this.currentCameraTarget.lerp(targetPos, Math.min(1, 10 * dt));
     this.updateCameraTransform(this.currentCameraTarget);
@@ -95,9 +117,9 @@ export class GameRenderer {
 
   private updateCameraTransform(target: THREE.Vector3): void {
     this.camera.position.set(
-      target.x + this.cameraOffset.x,
-      target.y + this.cameraOffset.y,
-      target.z + this.cameraOffset.z
+      target.x + this.cameraOffset.x * this.zoomFactor,
+      target.y + this.cameraOffset.y * this.zoomFactor,
+      target.z + this.cameraOffset.z * this.zoomFactor
     );
     this.camera.lookAt(target.x, target.y + 0.8, target.z);
   }

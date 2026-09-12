@@ -46,10 +46,12 @@ class ColisGame {
   private localPlayerEntity: PlayerEntity | null = null;
   private currentRoom: RoomState | null = null;
 
-  // Input state
+  // Input state & Physics velocity
   private keys: Record<string, boolean> = {};
   private lastTime: number = performance.now();
   private networkSendTimer: number = 0;
+  private verticalVelocity: number = 0;
+  private isGrounded: boolean = true;
 
   // Hovered target
   private hoveredSlot: { shelfId: string; slotIndex: number; mesh: THREE.Mesh } | null = null;
@@ -113,10 +115,15 @@ class ColisGame {
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
 
-      // Interaction keys
-      if (e.code === 'KeyE') {
+      // Jump & Interaction keys
+      if (e.code === 'Space') {
+        if (this.isGrounded) {
+          this.verticalVelocity = 5.8; // Snappy jump impulse
+          this.isGrounded = false;
+        }
+      } else if (e.code === 'KeyE') {
         this.handleActionE();
-      } else if (e.code === 'KeyR' || e.code === 'Space') {
+      } else if (e.code === 'KeyR') {
         this.handleActionOpenBox();
       } else if (e.code === 'KeyG') {
         this.network.sendDropBox();
@@ -372,18 +379,29 @@ class ColisGame {
     const speed = isSprinting ? 7.0 : 4.5;
     const isMoving = Math.hypot(worldDir.x, worldDir.z) > 0.05;
 
-    // Soft grounding velocity if on floor, standard gravity if falling
-    const gravityY = this.localPlayerState.position.y > 0.05 ? -9.81 * dt : -0.5 * dt;
+    // Vertical jump and gravity physics simulation
+    const wasGrounded = this.physics.isGrounded();
+    if (wasGrounded && this.verticalVelocity <= 0) {
+      this.isGrounded = true;
+      this.verticalVelocity = -0.5; // gentle grounding bias
+    } else {
+      this.isGrounded = false;
+      this.verticalVelocity -= 18.0 * dt; // gravity
+    }
 
     // Movement via Rapier3D Kinematic Character Controller
     const desiredDelta = {
       x: worldDir.x * speed * dt,
-      y: gravityY,
+      y: this.verticalVelocity * dt,
       z: worldDir.z * speed * dt,
     };
 
     const newPos = this.physics.computePlayerMovement(desiredDelta);
-    newPos.y = Math.max(0, newPos.y);
+    if (newPos.y <= 0.001) {
+      newPos.y = 0;
+      this.isGrounded = true;
+      if (this.verticalVelocity < 0) this.verticalVelocity = 0;
+    }
     this.localPlayerState.position = newPos;
 
     // Rotate player towards mouse aim or movement direction
@@ -401,7 +419,7 @@ class ColisGame {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
-      this.localPlayerEntity.tick(dt, isMoving, isSprinting, this.localPlayerState.position.y > 0.3);
+      this.localPlayerEntity.tick(dt, isMoving, isSprinting, !this.isGrounded);
     }
 
     // Send input to server at tick rate (~25Hz)
