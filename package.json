@@ -7,10 +7,11 @@
     "packages/*"
   ],
   "scripts": {
+    "sync": "git pull --rebase --autostash origin main",
     "dev": "npm run dev --workspaces --if-present",
     "dev:server": "npm run dev --workspace=@colis/server",
     "dev:client": "npm run dev --workspace=@colis/client",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@colis/shared && npm run build --workspace=@colis/server && npm run build --workspace=@colis/client",
     "lint": "npm run lint --workspaces --if-present"
   },
   "keywords": [
