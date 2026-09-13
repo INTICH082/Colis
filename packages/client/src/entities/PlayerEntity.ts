@@ -124,21 +124,23 @@ export class PlayerEntity {
     this.modelRoot.rotation.y = 0;
     this.group.add(this.modelRoot);
 
-    // Discover skeleton bones for Active Ragdoll
+    // Discover body parts for Active Ragdoll & Procedural IK
     const bones: CharacterBones = {};
     this.modelRoot.traverse((child) => {
-      const isObjOrBone = (child as THREE.Bone).isBone || child.type === 'Bone' || child.type === 'Object3D';
-      if (child.name === 'Torso') bones.torso = child;
-      else if (child.name === 'Head') bones.head = child;
-      else if (child.name === 'R_Leg') bones.rLeg = child;
-      else if (child.name === 'L_Leg') bones.lLeg = child;
-      else if (child.name === 'R_Hand') bones.rHand = child;
-      else if (child.name === 'L_Hand') bones.lHand = child;
-      else if (child.name === 'Root' && isObjOrBone && !(child as THREE.Mesh).isMesh) bones.root = child;
+      const isMesh = (child as THREE.Mesh).isMesh;
+      if (!isMesh) {
+        if (child.name === 'Torso') bones.torso = child;
+        else if (child.name === 'Head') bones.head = child;
+        else if (child.name === 'R_Leg') bones.rLeg = child;
+        else if (child.name === 'L_Leg') bones.lLeg = child;
+        else if (child.name === 'R_Hand') bones.rHand = child;
+        else if (child.name === 'L_Hand') bones.lHand = child;
+        else if (child.name === 'Root') bones.root = child;
+      }
     });
 
     this.ragdoll = new ActiveRagdollController(bones);
-    console.log(`[PlayerEntity] ActiveRagdoll initialized for player ${this.id} with bones:`, Object.keys(bones));
+    console.log(`[PlayerEntity] Pure IK + Ragdoll initialized for player ${this.id} with parts:`, Object.keys(bones));
 
     // Setup animation mixer as fallback or for manual toggle
     this.mixer = new THREE.AnimationMixer(this.modelRoot);
@@ -344,7 +346,12 @@ export class PlayerEntity {
       return;
     }
 
-    // Fallback: Baked animation mixer
+    // Standard: Baked animation mixer
+    if (this.heldBoxMesh.visible) {
+      this.heldBoxMesh.position.set(0, 0.75, -0.45);
+      this.heldBoxMesh.rotation.set(0, 0, 0);
+    }
+
     if (this.mixer) {
       this.mixer.update(dt);
     }

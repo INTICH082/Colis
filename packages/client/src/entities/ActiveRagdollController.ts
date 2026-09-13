@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 /**
- * Robust Second-Order Dynamics / Spring-Damper numerical solver.
- * Simulates mass-spring-damper physics with semi-implicit integration.
+ * Second-Order Dynamics / Spring-Damper numerical solver.
+ * Simulates mass-spring-damper physics with exact semi-implicit integration.
  */
 export class SpringDamper {
   public value: number;
@@ -69,12 +69,12 @@ export interface RagdollInputState {
  * ActiveRagdollController
  *
  * Procedural physical animation controller inspired by TABS, Human: Fall Flat, and PEAK.
- * Directly drives character skeleton bones using:
+ * Directly drives character body parts (Torso, Head, R_Leg, L_Leg, R_Hand, L_Hand) using:
  *  - Second-order dynamics spring-damper inverted pendulum balance (Torso)
- *  - Procedural gait generator & Leg IK (Walk, Sprint, Backpedal, Strafe)
- *  - Floppy active-ragdoll arms with drag, centrifugal flailing, and panic jump flapping
- *  - Heavy-object box holding physics with momentum lag
- *  - Secondary spring neck & head wobble
+ *  - Procedural gait generator with true Leg IK ground-tilt compensation (Walk, Sprint, Backpedal, Strafe)
+ *  - Floppy active-ragdoll arms with gravity compensation, centrifugal helicopter flailing, and panic jump flapping
+ *  - Heavy-object box holding physics with mass momentum lag
+ *  - Secondary neck and head bounce dynamics
  */
 export class ActiveRagdollController {
   private bones: CharacterBones = {};
@@ -88,24 +88,24 @@ export class ActiveRagdollController {
   private restLHandPos: THREE.Vector3 = new THREE.Vector3(0.3516, 0.07, 0);
 
   // Torso Dynamics Springs
-  private torsoYSpring: SpringDamper = new SpringDamper(1.25, 12, 0.6);
-  private torsoPitchSpring: SpringDamper = new SpringDamper(0, 10, 0.65);
-  private torsoRollSpring: SpringDamper = new SpringDamper(0, 11, 0.65);
-  private torsoYawSpring: SpringDamper = new SpringDamper(0, 12, 0.7);
+  public torsoYSpring: SpringDamper = new SpringDamper(1.25, 12, 0.6);
+  public torsoPitchSpring: SpringDamper = new SpringDamper(0, 11, 0.62);
+  public torsoRollSpring: SpringDamper = new SpringDamper(0, 11, 0.62);
+  public torsoYawSpring: SpringDamper = new SpringDamper(0, 13, 0.7);
 
   // Head Dynamics Springs
-  private headPitchSpring: SpringDamper = new SpringDamper(0, 14, 0.65);
-  private headRollSpring: SpringDamper = new SpringDamper(0, 14, 0.65);
-  private headYawSpring: SpringDamper = new SpringDamper(0, 15, 0.75);
+  public headPitchSpring: SpringDamper = new SpringDamper(0, 15, 0.65);
+  public headRollSpring: SpringDamper = new SpringDamper(0, 14, 0.65);
+  public headYawSpring: SpringDamper = new SpringDamper(0, 16, 0.75);
 
   // Arms Ragdoll Springs (X = swing pitch, Y = twist yaw, Z = flap/spread roll)
-  private rArmPitchSpring: SpringDamper = new SpringDamper(0, 9, 0.55);
-  private rArmRollSpring: SpringDamper = new SpringDamper(-0.18, 9, 0.55);
-  private rArmYawSpring: SpringDamper = new SpringDamper(0, 10, 0.6);
+  public rArmPitchSpring: SpringDamper = new SpringDamper(0, 10, 0.52);
+  public rArmRollSpring: SpringDamper = new SpringDamper(-0.15, 10, 0.55);
+  public rArmYawSpring: SpringDamper = new SpringDamper(0, 11, 0.6);
 
-  private lArmPitchSpring: SpringDamper = new SpringDamper(0, 9, 0.55);
-  private lArmRollSpring: SpringDamper = new SpringDamper(0.18, 9, 0.55);
-  private lArmYawSpring: SpringDamper = new SpringDamper(0, 10, 0.6);
+  public lArmPitchSpring: SpringDamper = new SpringDamper(0, 10, 0.52);
+  public lArmRollSpring: SpringDamper = new SpringDamper(0.15, 10, 0.55);
+  public lArmYawSpring: SpringDamper = new SpringDamper(0, 11, 0.6);
 
   // Held Box Momentum Lag Springs
   public boxOffsetPitch: SpringDamper = new SpringDamper(0, 12, 0.6);
@@ -114,10 +114,10 @@ export class ActiveRagdollController {
   public boxOffsetY: SpringDamper = new SpringDamper(0, 14, 0.65);
 
   // Legs Dynamics Springs
-  private rLegPitchSpring: SpringDamper = new SpringDamper(0, 18, 0.8);
-  private rLegRollSpring: SpringDamper = new SpringDamper(0, 18, 0.8);
-  private lLegPitchSpring: SpringDamper = new SpringDamper(0, 18, 0.8);
-  private lLegRollSpring: SpringDamper = new SpringDamper(0, 18, 0.8);
+  public rLegPitchSpring: SpringDamper = new SpringDamper(0, 18, 0.78);
+  public rLegRollSpring: SpringDamper = new SpringDamper(0, 18, 0.78);
+  public lLegPitchSpring: SpringDamper = new SpringDamper(0, 18, 0.78);
+  public lLegRollSpring: SpringDamper = new SpringDamper(0, 18, 0.78);
 
   // Gait Engine State
   private gaitPhase: number = 0;
@@ -176,8 +176,6 @@ export class ActiveRagdollController {
     this.prevRotY = playerRotationY;
 
     // 2. Local Movement Direction & Speed Projection
-    // In Three.js, character facing is along world direction (-sin(rotY), -cos(rotY))
-    // Character right is (cos(rotY), -sin(rotY))
     const sinR = Math.sin(playerRotationY);
     const cosR = Math.cos(playerRotationY);
 
@@ -188,28 +186,28 @@ export class ActiveRagdollController {
     if (isMoving && worldSpeed > 0.001) {
       const normX = worldMoveX / worldSpeed;
       const normZ = worldMoveZ / worldSpeed;
-      // Dot product with forward
+      // Dot product with forward (-sin, -cos)
       targetLocalFwd = -normX * sinR - normZ * cosR;
-      // Dot product with right
+      // Dot product with right (cos, -sin)
       targetLocalRight = normX * cosR - normZ * sinR;
     }
 
     const smoothSpeed = isMoving ? (isSprinting ? 1.0 : 0.6) : 0;
-    this.localVelFwd = THREE.MathUtils.lerp(this.localVelFwd, targetLocalFwd * smoothSpeed, Math.min(1, 12 * dt));
-    this.localVelRight = THREE.MathUtils.lerp(this.localVelRight, targetLocalRight * smoothSpeed, Math.min(1, 12 * dt));
+    this.localVelFwd = THREE.MathUtils.lerp(this.localVelFwd, targetLocalFwd * smoothSpeed, Math.min(1, 14 * dt));
+    this.localVelRight = THREE.MathUtils.lerp(this.localVelRight, targetLocalRight * smoothSpeed, Math.min(1, 14 * dt));
 
     // 3. Impact Detection (Landing from air)
     if (this.wasAirborne && !isAirborne) {
-      // Impact compression: torso squats down hard and rebounds!
-      this.torsoYSpring.impulse(-1.4);
-      this.headPitchSpring.impulse(0.6);
-      this.rArmPitchSpring.impulse(-0.9);
-      this.lArmPitchSpring.impulse(-0.9);
+      // Impact compression: torso squats down deeply and springs back!
+      this.torsoYSpring.impulse(-1.7);
+      this.headPitchSpring.impulse(0.7);
+      this.rArmPitchSpring.impulse(-1.1);
+      this.lArmPitchSpring.impulse(-1.1);
     }
     this.wasAirborne = isAirborne;
 
     // 4. Update Gait Phase & Procedural Foot Cycles
-    const strideFreq = isAirborne ? 4.5 : (isSprinting ? 10.0 : 7.2);
+    const strideFreq = isAirborne ? 4.5 : (isSprinting ? 9.6 : 6.8);
     if (isMoving || isAirborne) {
       this.gaitPhase += strideFreq * dt * (isMoving ? 1.0 : 0.7);
     }
@@ -217,7 +215,7 @@ export class ActiveRagdollController {
     // 5. Update Torso Balance & Suspension
     this.updateTorso(state);
 
-    // 6. Update Legs IK & Procedural Stepping
+    // 6. Update Legs IK & Procedural Stepping (with Torso Tilt Compensation)
     this.updateLegs(state);
 
     // 7. Update Ragdoll Arms (Pendulum / Flail / Box Hold)
@@ -241,46 +239,47 @@ export class ActiveRagdollController {
     // A. Vertical Suspension / Hip Bob
     let targetY = this.restTorsoY;
     if (isAirborne) {
-      targetY += 0.08;
+      targetY += 0.09;
     } else if (isMoving) {
-      const bobAmp = isSprinting ? 0.045 : 0.025;
+      // Double-frequency bob: hips dip when foot plants and rise during step transition
+      const bobAmp = isSprinting ? 0.05 : 0.028;
       targetY += Math.sin(this.gaitPhase * 2) * bobAmp;
     } else {
-      // Breathing
-      targetY += Math.sin(this.totalTime * 2.2) * 0.008;
+      // Gentle breathing idle
+      targetY += Math.sin(this.totalTime * 2.2) * 0.009;
     }
     const currentY = this.torsoYSpring.update(targetY, dt);
     this.bones.torso.position.y = currentY;
 
     // B. Pitch (Lean forward / backward)
-    // In Three.js hierarchy with 180-deg Root: positive pitch tilts torso forward!
     let targetPitch = 0;
     if (isAirborne) {
-      targetPitch = -0.15; // lean back slightly in air
+      targetPitch = -0.18; // Lean slightly back in air like jumping into the unknown
     } else if (isMoving) {
-      // Lean into forward motion, tilt back when backpedaling
-      targetPitch = this.localVelFwd * (isSprinting ? 0.32 : 0.18);
+      // Leaning aggressively into forward sprint, tilting back when backing up
+      targetPitch = this.localVelFwd * (isSprinting ? 0.38 : 0.22);
     }
     const currentPitch = this.torsoPitchSpring.update(targetPitch, dt);
 
-    // C. Roll (Centrifugal bank in turns + strafe lean + foot weight roll)
+    // C. Roll (Centrifugal bank in turns + strafe lean + foot weight transfer)
     let targetRoll = 0;
     // Centrifugal lean: banking into quick turns
-    targetRoll += THREE.MathUtils.clamp(-this.rotVelocityY * 0.04, -0.28, 0.28);
+    targetRoll += THREE.MathUtils.clamp(-this.rotVelocityY * 0.045, -0.32, 0.32);
     // Strafe lean: leaning sideways when moving left/right
-    targetRoll += this.localVelRight * (isSprinting ? 0.22 : 0.14);
+    targetRoll += this.localVelRight * (isSprinting ? 0.24 : 0.15);
     // Natural hip sway from stepping
     if (isMoving && !isAirborne) {
-      targetRoll += Math.sin(this.gaitPhase) * (isSprinting ? 0.06 : 0.035);
+      targetRoll += Math.sin(this.gaitPhase) * (isSprinting ? 0.07 : 0.04);
     } else if (!isMoving && !isAirborne) {
-      targetRoll += Math.sin(this.totalTime * 1.5) * 0.02;
+      // Subtle idle sway
+      targetRoll += Math.sin(this.totalTime * 1.5) * 0.025;
     }
     const currentRoll = this.torsoRollSpring.update(targetRoll, dt);
 
     // D. Yaw (Torso twist towards movement)
     let targetYaw = 0;
     if (isMoving && !isAirborne) {
-      targetYaw = Math.cos(this.gaitPhase) * (isSprinting ? 0.12 : 0.06);
+      targetYaw = Math.cos(this.gaitPhase) * (isSprinting ? 0.14 : 0.08);
     }
     const currentYaw = this.torsoYawSpring.update(targetYaw, dt);
 
@@ -288,65 +287,68 @@ export class ActiveRagdollController {
   }
 
   /**
-   * Procedural Gait Engine & Leg IK
+   * Procedural Gait Engine & True Leg IK with Ground Compensation
    */
   private updateLegs(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean }): void {
     if (!this.bones.rLeg || !this.bones.lLeg) return;
 
     const { dt, isMoving, isSprinting, isAirborne } = state;
 
-    let rPitchTarget = 0;
-    let rRollTarget = -0.05; // natural slight stance spread
-    let lPitchTarget = 0;
-    let lRollTarget = 0.05;
+    // CRITICAL IK STEP: Compensate for Torso pitch and roll so stance feet stay planted vertically on floor!
+    const torsoPitch = this.torsoPitchSpring.value;
+    const torsoRoll = this.torsoRollSpring.value;
+
+    let rPitchTarget = -torsoPitch; // default upright perpendicular to floor
+    let lPitchTarget = -torsoPitch;
+    let rRollTarget = -torsoRoll - 0.05; // natural slight outward stance
+    let lRollTarget = -torsoRoll + 0.05;
 
     let rYTarget = this.restRLegPos.y;
     let lYTarget = this.restLLegPos.y;
 
     if (isAirborne) {
       // === AIRBORNE JUMP / FALL ===
-      // Feet dangle backwards (+ pitch); comical air bicycle kicks
+      // Feet lose contact with ground; dangle back from inertia and kick comically
       const airWave = Math.sin(this.gaitPhase);
-      rPitchTarget = 0.35 + airWave * 0.25;
-      lPitchTarget = 0.35 - airWave * 0.25;
-      // Legs spread outward in panic
-      rRollTarget = -0.18;
-      lRollTarget = 0.18;
-      rYTarget += 0.06;
-      lYTarget += 0.06;
+      rPitchTarget = 0.35 + airWave * 0.28;
+      lPitchTarget = 0.35 - airWave * 0.28;
+      rRollTarget = -0.2;
+      lRollTarget = 0.2;
+      rYTarget += 0.07;
+      lYTarget += 0.07;
     } else if (isMoving) {
       // === PROCEDURAL WALKING / SPRINTING ===
-      const strideAmp = isSprinting ? 0.72 : 0.48;
+      const strideAmp = isSprinting ? 0.78 : 0.50;
       const legWave = Math.sin(this.gaitPhase);
-
-      // In Three.js: negative pitch swings leg FORWARD (-Z), positive pitch swings leg BACKWARD (+Z).
-      // When localVelFwd > 0 (moving forward):
-      // When legWave > 0: right leg swings FORWARD (negative pitch), left leg swings BACKWARD (positive pitch).
       const fwdFactor = Math.abs(this.localVelFwd) > 0.05 ? Math.sign(this.localVelFwd) : 1;
-      rPitchTarget = -legWave * strideAmp * fwdFactor;
-      lPitchTarget = legWave * strideAmp * fwdFactor;
+
+      // In model local space: negative pitch swings leg forward (-Z), positive pitch swings leg backward (+Z)
+      const swingPitchR = -legWave * strideAmp * fwdFactor;
+      const swingPitchL = legWave * strideAmp * fwdFactor;
+
+      rPitchTarget += swingPitchR;
+      lPitchTarget += swingPitchL;
 
       // Sideways strafe stepping:
       if (Math.abs(this.localVelRight) > 0.05) {
-        const strafeAmp = (isSprinting ? 0.32 : 0.20) * Math.sign(this.localVelRight);
+        const strafeAmp = (isSprinting ? 0.35 : 0.22) * Math.sign(this.localVelRight);
         rRollTarget += legWave * strafeAmp;
         lRollTarget += legWave * strafeAmp;
       }
 
       // Parabolic step lift during forward swing phase
-      // Right leg swings forward when (-legWave * fwdFactor) < 0 => legWave * fwdFactor > 0
       const rSwing = Math.max(0, legWave * fwdFactor);
       const lSwing = Math.max(0, -legWave * fwdFactor);
-      const stepLift = isSprinting ? 0.055 : 0.035;
+      const stepLift = isSprinting ? 0.065 : 0.04;
       rYTarget += rSwing * stepLift;
       lYTarget += lSwing * stepLift;
     } else {
       // === IDLE / STANDING ===
       const idleSway = Math.sin(this.totalTime * 1.5);
-      rPitchTarget = idleSway * 0.03;
-      lPitchTarget = -idleSway * 0.03;
-      rRollTarget = -0.06;
-      lRollTarget = 0.06;
+      rPitchTarget += idleSway * 0.03;
+      lPitchTarget -= idleSway * 0.03;
+      rRollTarget -= 0.02;
+      lRollTarget += 0.02;
     }
 
     const curRPitch = this.rLegPitchSpring.update(rPitchTarget, dt);
@@ -362,24 +364,27 @@ export class ActiveRagdollController {
   }
 
   /**
-   * Floppy Active-Ragdoll Arms (Pendulums, Centrifugal Wind-up, Panic Jumping Flail, and Box Clasp)
+   * Floppy Active-Ragdoll Arms (Gravity Hang, Pendulums, Centrifugal Wind-up, Panic Jumping Flail, and Box Clasp)
    */
   private updateArms(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean; isHoldingBox: boolean }): void {
     if (!this.bones.rHand || !this.bones.lHand) return;
 
     const { dt, isMoving, isSprinting, isAirborne, isHoldingBox } = state;
 
-    let rPitchTarget = 0;
+    // Gravity compensation base: arms hang straight down when torso tilts
+    const torsoPitch = this.torsoPitchSpring.value;
+
+    let rPitchTarget = -torsoPitch * 0.75;
     let rRollTarget = -0.15; // natural outward hang
     let rYawTarget = 0;
 
-    let lPitchTarget = 0;
+    let lPitchTarget = -torsoPitch * 0.75;
     let lRollTarget = 0.15;
     let lYawTarget = 0;
 
     if (isHoldingBox) {
       // === HOLDING BOX POSTURE (With Dynamic Weight Momentum) ===
-      // In Three.js: arms reach forward horizontally (-1.35 rad pitch)
+      // Arms reach forward horizontally (-1.35 rad pitch in model coords)
       rPitchTarget = -1.35 + this.boxOffsetPitch.value;
       rRollTarget = -0.18 + this.boxOffsetRoll.value;
       rYawTarget = 0.35 + this.boxOffsetYaw.value;
@@ -396,32 +401,31 @@ export class ActiveRagdollController {
     } else if (isAirborne) {
       // === TABS / GANG BEASTS PANIC AIR FLAP! ===
       // Arms fly up high above head and wave wildly in frantic circular patterns
-      const panicTime = this.totalTime * 12;
-      const flapPitch = -2.3 + Math.sin(panicTime) * 0.35;
-      const rFlapRoll = -0.7 - Math.cos(panicTime * 1.1) * 0.3;
-      const lFlapRoll = 0.7 + Math.cos(panicTime * 1.1 + 0.5) * 0.3;
+      const panicTime = this.totalTime * 14;
+      const flapPitch = -2.35 + Math.sin(panicTime) * 0.35;
+      const rFlapRoll = -0.75 - Math.cos(panicTime * 1.1) * 0.3;
+      const lFlapRoll = 0.75 + Math.cos(panicTime * 1.1 + 0.5) * 0.3;
 
       rPitchTarget = flapPitch;
       rRollTarget = rFlapRoll;
-      rYawTarget = Math.sin(panicTime * 0.8) * 0.3;
+      rYawTarget = Math.sin(panicTime * 0.8) * 0.35;
 
       lPitchTarget = flapPitch;
       lRollTarget = lFlapRoll;
-      lYawTarget = -Math.sin(panicTime * 0.8) * 0.3;
+      lYawTarget = -Math.sin(panicTime * 0.8) * 0.35;
     } else if (isMoving) {
       // === ACTIVE RAGDOLL PENDULUM LOCOMOTION ===
-      // Arms swing in OPPOSITION to legs:
-      // When right leg is forward (negative pitch), right arm swings backward (positive pitch)!
+      // Arms swing in OPPOSITION to legs (right arm swings backward when right leg swings forward)
       const armSwingAmp = isSprinting ? 0.95 : 0.55;
       const armWave = Math.sin(this.gaitPhase);
 
-      rPitchTarget = armWave * armSwingAmp;
-      lPitchTarget = -armWave * armSwingAmp;
+      rPitchTarget += armWave * armSwingAmp;
+      lPitchTarget -= armWave * armSwingAmp;
 
       // Centrifugal outward swing when spinning
-      const centrifugalSpread = Math.abs(this.rotVelocityY) * 0.08;
-      rRollTarget = -0.22 - centrifugalSpread;
-      lRollTarget = 0.22 + centrifugalSpread;
+      const centrifugalSpread = Math.abs(this.rotVelocityY) * 0.085;
+      rRollTarget -= centrifugalSpread;
+      lRollTarget += centrifugalSpread;
 
       // Inertial lag on sharp turns
       rYawTarget = THREE.MathUtils.clamp(this.rotVelocityY * 0.04, -0.3, 0.3);
@@ -429,10 +433,8 @@ export class ActiveRagdollController {
     } else {
       // === IDLE FLOATING / SIGHING ARMS ===
       const idleArm = Math.sin(this.totalTime * 1.8) * 0.04;
-      rPitchTarget = idleArm;
-      lPitchTarget = -idleArm;
-      rRollTarget = -0.18;
-      lRollTarget = 0.18;
+      rPitchTarget += idleArm;
+      lPitchTarget -= idleArm;
 
       // Centrifugal helicopter effect if spinning around while stationary!
       if (Math.abs(this.rotVelocityY) > 0.5) {
@@ -463,21 +465,25 @@ export class ActiveRagdollController {
     if (!this.bones.head) return;
 
     const { dt, isMoving, isSprinting, isAirborne } = state;
+    const torsoPitch = this.torsoPitchSpring.value;
 
-    let targetPitch = 0;
+    // Head compensates for torso tilt to keep eyes on the horizon
+    let targetPitch = -torsoPitch * 0.5;
     let targetRoll = 0;
     let targetYaw = 0;
 
     if (isAirborne) {
-      targetPitch = 0.25;
+      // Head tilts down to look at landing
+      targetPitch += 0.3;
       targetRoll = Math.sin(this.totalTime * 8) * 0.1;
     } else if (isMoving) {
-      targetPitch = isSprinting ? 0.15 : 0.05;
+      targetPitch += isSprinting ? 0.12 : 0.04;
       targetPitch += Math.sin(this.gaitPhase * 2) * (isSprinting ? 0.05 : 0.025);
       targetYaw = THREE.MathUtils.clamp(-this.rotVelocityY * 0.03, -0.25, 0.25);
       targetRoll = THREE.MathUtils.clamp(this.rotVelocityY * 0.02, -0.15, 0.15);
     } else {
-      targetPitch = Math.sin(this.totalTime * 1.2) * 0.03;
+      // Idle curious head bob
+      targetPitch += Math.sin(this.totalTime * 1.2) * 0.03;
       targetRoll = Math.sin(this.totalTime * 0.8) * 0.04;
     }
 
