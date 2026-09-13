@@ -19,6 +19,7 @@ import { BoxEntityManager } from './entities/BoxEntityManager.js';
 import { PlayerEntity } from './entities/PlayerEntity.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { EnvironmentCollisionManager } from './physics/EnvironmentCollisionManager.js';
+import { PhysicalObstacleSolver } from './physics/PhysicalObstacleSolver.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIOverlay } from './ui/UIOverlay.js';
 
@@ -27,6 +28,7 @@ class ColisGame {
   private renderer: GameRenderer;
   private physics: PhysicsWorld;
   private envCollision: EnvironmentCollisionManager;
+  private obstacleSolver: PhysicalObstacleSolver;
   private lastTackleTime: number = 0;
   private environment: StoreEnvironment;
   private shelfManager: InstancedShelfManager;
@@ -68,6 +70,7 @@ class ColisGame {
     this.boxManager = new BoxEntityManager(this.renderer.scene);
     this.physics = new PhysicsWorld();
     this.envCollision = new EnvironmentCollisionManager();
+    this.obstacleSolver = new PhysicalObstacleSolver();
     this.ui = new UIOverlay();
 
     // Determine WS server URL (uses current hostname, port 8080)
@@ -264,6 +267,7 @@ class ColisGame {
     this.environment.syncShelves(data.room.shelves);
     this.shelfManager.updateShelves(data.room.shelves);
     this.physics.registerShelves(data.room.shelves);
+    this.obstacleSolver.setShelves(data.room.shelves);
 
     // Sync boxes
     this.boxManager.syncBoxes(data.room.boxes);
@@ -352,6 +356,7 @@ class ColisGame {
     if (this.currentRoom) {
       this.currentRoom.shelves[shelf.id] = shelf;
       this.shelfManager.updateShelves(this.currentRoom.shelves);
+      this.obstacleSolver.setShelves(this.currentRoom.shelves);
     }
   };
 
@@ -411,7 +416,7 @@ class ColisGame {
   private updatePlayerMovement(dt: number): void {
     // If local player is knocked down / getting up, disable input and apply sliding physics
     if (this.localPlayerEntity?.isKnockedDown()) {
-      this.localPlayerEntity.tick(dt, false, false, false, 0, 0);
+      this.localPlayerEntity.tick(dt, false, false, false, 0, 0, this.obstacleSolver);
       const slidPos = this.localPlayerEntity.group.position;
       this.localPlayerState.position.x = slidPos.x;
       this.localPlayerState.position.y = slidPos.y;
@@ -495,7 +500,15 @@ class ColisGame {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
-      this.localPlayerEntity.tick(dt, isMoving, isSprinting, isAirborne, worldDir.x, worldDir.z);
+      this.localPlayerEntity.tick(
+        dt,
+        isMoving,
+        isSprinting,
+        isAirborne,
+        worldDir.x,
+        worldDir.z,
+        this.obstacleSolver
+      );
     }
 
     const nowSec = performance.now() / 1000;
@@ -662,7 +675,7 @@ class ColisGame {
   private updateInterpolations(dt: number): void {
     const nowSec = performance.now() / 1000;
     for (const remote of this.remotePlayers.values()) {
-      remote.tickInterpolation(dt, false);
+      remote.tickInterpolation(dt, false, this.obstacleSolver);
       if (this.currentRoom) {
         this.envCollision.checkCollisions(remote, this.currentRoom.shelves, 3.5, nowSec);
       }

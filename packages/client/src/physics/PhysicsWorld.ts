@@ -66,13 +66,20 @@ export class PhysicsWorld {
     );
   }
 
+  private shelfBodies: RAPIER.RigidBody[] = [];
+
   public registerShelves(shelves: Record<string, ShelfState>): void {
+    for (const body of this.shelfBodies) {
+      this.world.removeRigidBody(body);
+    }
+    this.shelfBodies = [];
+
     for (const shelf of Object.values(shelves)) {
       const shelfHalfW = SHELF_CONFIG.WIDTH / 2;
       const shelfHalfH = SHELF_CONFIG.HEIGHT / 2;
       const shelfHalfD = SHELF_CONFIG.DEPTH / 2;
 
-      const colliderDesc = RAPIER.ColliderDesc.cuboid(shelfHalfW, shelfHalfH, shelfHalfD)
+      const bodyDesc = RAPIER.RigidBodyDesc.fixed()
         .setTranslation(shelf.position.x, shelfHalfH, shelf.position.z)
         .setRotation({
           x: 0,
@@ -81,7 +88,10 @@ export class PhysicsWorld {
           w: Math.cos(shelf.rotationY / 2),
         });
 
-      this.world.createCollider(colliderDesc);
+      const body = this.world.createRigidBody(bodyDesc);
+      const colliderDesc = RAPIER.ColliderDesc.cuboid(shelfHalfW, shelfHalfH, shelfHalfD);
+      this.world.createCollider(colliderDesc, body);
+      this.shelfBodies.push(body);
     }
   }
 

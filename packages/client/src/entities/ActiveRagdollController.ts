@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { EnvironmentContext, PhysicalObstacleSolver } from '../physics/PhysicalObstacleSolver';
 
 /**
  * Second-Order Dynamics / Spring-Damper numerical solver.
@@ -63,6 +64,8 @@ export interface RagdollInputState {
   worldMoveZ: number;
   playerRotationY: number;
   isHoldingBox: boolean;
+  playerWorldPos?: THREE.Vector3;
+  obstacleSolver?: PhysicalObstacleSolver;
 }
 
 export type RagdollStatus = 'ACTIVE' | 'KNOCKED_DOWN' | 'GETTING_UP';
@@ -70,13 +73,16 @@ export type RagdollStatus = 'ACTIVE' | 'KNOCKED_DOWN' | 'GETTING_UP';
 /**
  * ActiveRagdollController
  *
- * Procedural physical animation controller inspired by TABS, Human: Fall Flat, Gang Beasts, and PEAK.
- * Directly drives character body parts (Torso, Head, R_Leg, L_Leg, R_Hand, L_Hand) using:
+ * Fully procedural physical animation and deformation system inspired by TABS, Human: Fall Flat, and Gang Beasts.
+ * Directly drives character body parts (Torso, Head, R_Leg, L_Leg, R_Hand, L_Hand) with:
+ *  - Real-time continuous environment obstacle avoidance & proximity sensing (shelves, walls)
+ *  - Procedural arm tucking against the torso (arms hug ribs when near shelves)
+ *  - Body squeezing in narrow corridors (shoulders compress, torso angles sideways)
+ *  - Non-penetrating hand & limb surface constraints (IK pushes hands onto obstacle surfaces)
  *  - Second-order dynamics spring-damper inverted pendulum balance (Torso)
  *  - True Leg IK ground tilt compensation
- *  - Smooth airborne weight transitions (eliminates abrupt arm snapping after landing)
+ *  - Smooth airborne weight transitions (butter-smooth jump landings)
  *  - Full Ragdoll Knockdown, floor sliding, and comical get-up recovery sequence
- *  - Limb obstacle impact recoil (hands catch on shelves, head bonks)
  *  - Heavy box holding physics with dynamic mass momentum lag
  */
 export class ActiveRagdollController {
@@ -88,7 +94,7 @@ export class ActiveRagdollController {
   public getUpTimer: number = 0;
   public slideVelocity: THREE.Vector3 = new THREE.Vector3();
 
-  // Smooth Airborne Transition Blend (0 = pure ground gait, 1 = pure airborne flail)
+  // Smooth Airborne Transition Blend (0 = ground, 1 = airborne flail)
   private airborneBlend: number = 0;
 
   // Base rest transforms recorded from initial model bind pose
@@ -98,6 +104,10 @@ export class ActiveRagdollController {
   private restLLegPos: THREE.Vector3 = new THREE.Vector3(0.1875, -0.508, 0);
   private restRHandPos: THREE.Vector3 = new THREE.Vector3(-0.3516, 0.07, 0);
   private restLHandPos: THREE.Vector3 = new THREE.Vector3(0.3516, 0.07, 0);
+
+  // Dynamic shoulder compression offsets
+  private currentShoulderR: THREE.Vector3 = new THREE.Vector3(-0.3516, 0.07, 0);
+  private currentShoulderL: THREE.Vector3 = new THREE.Vector3(0.3516, 0.07, 0);
 
   // Torso Dynamics Springs
   public torsoYSpring: SpringDamper = new SpringDamper(1.25, 11, 0.62);
@@ -111,13 +121,13 @@ export class ActiveRagdollController {
   public headYawSpring: SpringDamper = new SpringDamper(0, 15, 0.72);
 
   // Arms Ragdoll Springs (X = swing pitch, Y = twist yaw, Z = flap/spread roll)
-  public rArmPitchSpring: SpringDamper = new SpringDamper(0, 9, 0.54);
-  public rArmRollSpring: SpringDamper = new SpringDamper(-0.15, 9, 0.56);
-  public rArmYawSpring: SpringDamper = new SpringDamper(0, 10, 0.6);
+  public rArmPitchSpring: SpringDamper = new SpringDamper(0, 10, 0.58);
+  public rArmRollSpring: SpringDamper = new SpringDamper(-0.15, 10, 0.60);
+  public rArmYawSpring: SpringDamper = new SpringDamper(0, 11, 0.64);
 
-  public lArmPitchSpring: SpringDamper = new SpringDamper(0, 9, 0.54);
-  public lArmRollSpring: SpringDamper = new SpringDamper(0.15, 9, 0.56);
-  public lArmYawSpring: SpringDamper = new SpringDamper(0, 10, 0.6);
+  public lArmPitchSpring: SpringDamper = new SpringDamper(0, 10, 0.58);
+  public lArmRollSpring: SpringDamper = new SpringDamper(0.15, 10, 0.60);
+  public lArmYawSpring: SpringDamper = new SpringDamper(0, 11, 0.64);
 
   // Held Box Momentum Lag Springs
   public boxOffsetPitch: SpringDamper = new SpringDamper(0, 12, 0.6);
@@ -140,6 +150,15 @@ export class ActiveRagdollController {
   private localVelFwd: number = 0;
   private localVelRight: number = 0;
 
+  // Reusable vectors for zero-allocation math
+  private static readonly REST_ARM_DIR: THREE.Vector3 = new THREE.Vector3(0, -1, 0);
+  private static readonly TIP_LOCAL_OFFSET: THREE.Vector3 = new THREE.Vector3(0, -0.65, 0);
+  private tempVecA: THREE.Vector3 = new THREE.Vector3();
+  private tempVecB: THREE.Vector3 = new THREE.Vector3();
+  private tempVecC: THREE.Vector3 = new THREE.Vector3();
+  private tempQuatA: THREE.Quaternion = new THREE.Quaternion();
+  private tempQuatB: THREE.Quaternion = new THREE.Quaternion();
+
   constructor(bones: CharacterBones) {
     this.bones = bones;
     this.recordRestPoses();
@@ -161,9 +180,11 @@ export class ActiveRagdollController {
     }
     if (this.bones.rHand) {
       this.restRHandPos.copy(this.bones.rHand.position);
+      this.currentShoulderR.copy(this.restRHandPos);
     }
     if (this.bones.lHand) {
       this.restLHandPos.copy(this.bones.lHand.position);
+      this.currentShoulderL.copy(this.restLHandPos);
     }
   }
 
@@ -177,10 +198,10 @@ export class ActiveRagdollController {
    */
   public triggerKnockdown(impulseDir: THREE.Vector3, force: number = 1.0): void {
     this.status = 'KNOCKED_DOWN';
-    this.knockdownTimer = 1.4; // Lie and slide on floor for 1.4s
+    this.knockdownTimer = 1.4; // Lie and slide on floor
     this.getUpTimer = 0;
 
-    // Slide across the floor with physical momentum
+    // Slide across floor with physical momentum
     const hDir = new THREE.Vector2(impulseDir.x, impulseDir.z).normalize();
     const slideSpeed = THREE.MathUtils.clamp(force * 5.5, 3.0, 9.0);
     this.slideVelocity.set(hDir.x * slideSpeed, 0, hDir.y * slideSpeed);
@@ -197,44 +218,53 @@ export class ActiveRagdollController {
   }
 
   /**
-   * Physical recoil when a limb or body part clips a shelf or wall
+   * Physical recoil when a limb or body part clips an obstacle
    */
   public triggerLimbHit(limb: 'rHand' | 'lHand' | 'head' | 'torso', force: number = 1.0): void {
     const clampedForce = THREE.MathUtils.clamp(force, 0.4, 2.5);
     switch (limb) {
       case 'rHand':
-        // Arm snaps back and body twists
-        this.rArmPitchSpring.impulse(clampedForce * 4.5);
-        this.rArmRollSpring.impulse(-clampedForce * 1.8);
-        this.torsoRollSpring.impulse(-clampedForce * 1.2);
-        this.torsoYawSpring.impulse(clampedForce * 1.4);
+        this.rArmPitchSpring.impulse(clampedForce * 3.5);
+        this.rArmRollSpring.impulse(clampedForce * 1.5);
+        this.torsoRollSpring.impulse(-clampedForce * 0.8);
+        this.torsoYawSpring.impulse(clampedForce * 0.9);
         break;
       case 'lHand':
-        this.lArmPitchSpring.impulse(clampedForce * 4.5);
-        this.lArmRollSpring.impulse(clampedForce * 1.8);
-        this.torsoRollSpring.impulse(clampedForce * 1.2);
-        this.torsoYawSpring.impulse(-clampedForce * 1.4);
+        this.lArmPitchSpring.impulse(clampedForce * 3.5);
+        this.lArmRollSpring.impulse(-clampedForce * 1.5);
+        this.torsoRollSpring.impulse(clampedForce * 0.8);
+        this.torsoYawSpring.impulse(-clampedForce * 0.9);
         break;
       case 'head':
-        // Head bonk! Snaps backward
-        this.headPitchSpring.impulse(-clampedForce * 4.0);
-        this.torsoPitchSpring.impulse(-clampedForce * 1.5);
+        this.headPitchSpring.impulse(-clampedForce * 3.2);
+        this.torsoPitchSpring.impulse(-clampedForce * 1.2);
         break;
       case 'torso':
-        this.torsoPitchSpring.impulse(-clampedForce * 2.5);
-        this.torsoYSpring.impulse(-clampedForce * 1.0);
+        this.torsoPitchSpring.impulse(-clampedForce * 2.2);
+        this.torsoYSpring.impulse(-clampedForce * 0.8);
         break;
     }
   }
 
   /**
-   * Main Physics Tick
+   * Main Physics & Procedural IK Tick
    */
   public update(state: RagdollInputState): void {
-    const { dt, isMoving, isSprinting, isAirborne, worldMoveX, worldMoveZ, playerRotationY } = state;
+    const {
+      dt,
+      isMoving,
+      isSprinting,
+      isAirborne,
+      worldMoveX,
+      worldMoveZ,
+      playerRotationY,
+      playerWorldPos,
+      obstacleSolver,
+    } = state;
+
     this.totalTime += dt;
 
-    // 1. Angular Velocity Calculation (Centrifugal effects & turns)
+    // 1. Angular Velocity Calculation (centrifugal lean & turns)
     let rotDiff = playerRotationY - this.prevRotY;
     while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
     while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
@@ -242,10 +272,9 @@ export class ActiveRagdollController {
     this.rotVelocityY = THREE.MathUtils.lerp(this.rotVelocityY, currentRotVel, Math.min(1, 15 * dt));
     this.prevRotY = playerRotationY;
 
-    // 2. Smooth Airborne Weight (Fixes abrupt snapping after landing!)
-    // When airborne, target is 1.0; when grounded, smoothly decays to 0.0 over ~0.35s
+    // 2. Smooth Airborne Weight (eliminates abrupt snapping after landing)
     const targetAirBlend = isAirborne ? 1.0 : 0.0;
-    const airBlendSpeed = isAirborne ? 14.0 : 5.5; // Fast takeoff, smooth landing recovery
+    const airBlendSpeed = isAirborne ? 14.0 : 5.5;
     this.airborneBlend = THREE.MathUtils.lerp(this.airborneBlend, targetAirBlend, Math.min(1, airBlendSpeed * dt));
 
     // 3. Local Movement Direction & Speed Projection
@@ -266,9 +295,8 @@ export class ActiveRagdollController {
     this.localVelFwd = THREE.MathUtils.lerp(this.localVelFwd, targetLocalFwd * smoothSpeed, Math.min(1, 14 * dt));
     this.localVelRight = THREE.MathUtils.lerp(this.localVelRight, targetLocalRight * smoothSpeed, Math.min(1, 14 * dt));
 
-    // 4. Impact Detection (Landing from air)
+    // 4. Landing Squash
     if (this.wasAirborne && !isAirborne) {
-      // Natural landing squash: torso squats with spring rebound
       this.torsoYSpring.impulse(-1.5);
       this.headPitchSpring.impulse(0.5);
     }
@@ -277,11 +305,10 @@ export class ActiveRagdollController {
     // 5. State Machine: Knockdown / Getting Up / Active
     if (this.status === 'KNOCKED_DOWN') {
       this.knockdownTimer -= dt;
-      // Friction slide on floor
       this.slideVelocity.multiplyScalar(Math.pow(0.15, dt));
       if (this.knockdownTimer <= 0) {
         this.status = 'GETTING_UP';
-        this.getUpTimer = 1.1; // 1.1s getting up sequence
+        this.getUpTimer = 1.1;
       }
       this.updateKnockdown(dt);
       return;
@@ -294,17 +321,23 @@ export class ActiveRagdollController {
       return;
     }
 
-    // 6. Update Gait Phase
+    // 6. Continuous Physical Environment Clearance & Squeeze Query
+    let env: EnvironmentContext | null = null;
+    if (obstacleSolver && playerWorldPos) {
+      env = obstacleSolver.getCharacterEnvironmentContext(playerWorldPos, playerRotationY);
+    }
+
+    // 7. Update Gait Phase
     const strideFreq = isAirborne ? 4.5 : (isSprinting ? 9.6 : 6.8);
     if (isMoving || isAirborne) {
       this.gaitPhase += strideFreq * dt * (isMoving ? 1.0 : 0.7);
     }
 
-    // 7. Update Active Components
-    this.updateTorso(state);
-    this.updateLegs(state);
-    this.updateArms(state);
-    this.updateHead(state);
+    // 8. Update Active Components
+    this.updateTorso(state, env);
+    this.updateLegs(state, env);
+    this.updateArms(state, env, obstacleSolver);
+    this.updateHead(state, env);
     this.updateBoxSprings(state);
   }
 
@@ -314,7 +347,6 @@ export class ActiveRagdollController {
   private updateKnockdown(dt: number): void {
     if (!this.bones.torso) return;
 
-    // Torso collapses flat on the ground
     const curY = this.torsoYSpring.update(0.24, dt);
     this.bones.torso.position.y = curY;
 
@@ -323,7 +355,6 @@ export class ActiveRagdollController {
     const curYaw = this.torsoYawSpring.update(0.3, dt);
     this.bones.torso.rotation.set(curPitch, curYaw, curRoll);
 
-    // Limbs splay out limply on floor with loose jiggle
     if (this.bones.rLeg && this.bones.lLeg) {
       const curRPitch = this.rLegPitchSpring.update(0.7, dt);
       const curLPitch = this.lLegPitchSpring.update(-0.5, dt);
@@ -355,22 +386,18 @@ export class ActiveRagdollController {
   private updateGettingUp(dt: number): void {
     if (!this.bones.torso) return;
 
-    // Progress 0 (just started getting up) to 1 (standing)
     const progress = 1.0 - Math.max(0, this.getUpTimer) / 1.1;
 
-    // Torso rises up
     const targetY = THREE.MathUtils.lerp(0.55, this.restTorsoY, progress);
     const curY = this.torsoYSpring.update(targetY, dt);
     this.bones.torso.position.y = curY;
 
-    // Drunk wobbly tilt straightening out
     const targetPitch = THREE.MathUtils.lerp(0.8, 0, progress);
     const targetRoll = Math.sin(this.totalTime * 8) * (1 - progress) * 0.25;
     const curPitch = this.torsoPitchSpring.update(targetPitch, dt);
     const curRoll = this.torsoRollSpring.update(targetRoll, dt);
     this.bones.torso.rotation.set(curPitch, 0, curRoll);
 
-    // Hands pushing against floor
     if (this.bones.rHand && this.bones.lHand) {
       const pushPitch = THREE.MathUtils.lerp(-1.1, 0, progress);
       const pushRollR = THREE.MathUtils.lerp(-0.45, -0.15, progress);
@@ -379,14 +406,12 @@ export class ActiveRagdollController {
       this.bones.lHand.rotation.set(this.lArmPitchSpring.update(pushPitch, dt), 0, this.lArmRollSpring.update(pushRollL, dt));
     }
 
-    // Legs scrambling under body
     if (this.bones.rLeg && this.bones.lLeg) {
       const legScramble = Math.sin(this.totalTime * 12) * (1 - progress) * 0.35;
       this.bones.rLeg.rotation.set(this.rLegPitchSpring.update(legScramble, dt), 0, -0.1);
       this.bones.lLeg.rotation.set(this.lLegPitchSpring.update(-legScramble, dt), 0, 0.1);
     }
 
-    // Head shaking off dizziness
     if (this.bones.head) {
       const dizzyYaw = Math.sin(this.totalTime * 10) * (1 - progress) * 0.4;
       const headPitch = THREE.MathUtils.lerp(0.4, 0, progress);
@@ -395,9 +420,12 @@ export class ActiveRagdollController {
   }
 
   /**
-   * Torso: Inverted Pendulum with Spring Suspension
+   * Torso: Inverted Pendulum, Spring Suspension & Obstacle Reaction
    */
-  private updateTorso(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean }): void {
+  private updateTorso(
+    state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean },
+    env: EnvironmentContext | null
+  ): void {
     if (!this.bones.torso) return;
     const { dt, isMoving, isSprinting } = state;
 
@@ -406,21 +434,30 @@ export class ActiveRagdollController {
     if (this.airborneBlend > 0.05) {
       targetY += 0.09 * this.airborneBlend;
     } else if (isMoving) {
-      const bobAmp = isSprinting ? 0.05 : 0.028;
+      const bobAmp = isSprinting ? 0.055 : 0.032;
       targetY += Math.sin(this.gaitPhase * 2) * bobAmp;
     } else {
       targetY += Math.sin(this.totalTime * 2.2) * 0.009;
     }
+
+    // Squeeze compression: slightly crouch when squeezing through tight spaces
+    if (env && env.squeezeFactor > 0.1) {
+      targetY -= 0.04 * env.squeezeFactor;
+    }
+
     const currentY = this.torsoYSpring.update(targetY, dt);
     this.bones.torso.position.y = currentY;
 
-    // B. Pitch (Lean forward / backward)
-    const groundPitch = isMoving ? this.localVelFwd * (isSprinting ? 0.38 : 0.22) : 0;
+    // B. Pitch (Lean into motion + obstacle repulsion)
+    let groundPitch = isMoving ? this.localVelFwd * (isSprinting ? 0.38 : 0.22) : 0;
+    if (env) {
+      groundPitch += env.bodyDeflectPitch; // Leans back if shelf is in front!
+    }
     const airPitch = -0.18;
     const targetPitch = THREE.MathUtils.lerp(groundPitch, airPitch, this.airborneBlend);
     const currentPitch = this.torsoPitchSpring.update(targetPitch, dt);
 
-    // C. Roll (Centrifugal bank + weight shift)
+    // C. Roll (Centrifugal bank + weight shift + side obstacle deflection)
     let groundRoll = THREE.MathUtils.clamp(-this.rotVelocityY * 0.045, -0.32, 0.32);
     groundRoll += this.localVelRight * (isSprinting ? 0.24 : 0.15);
     if (isMoving) {
@@ -428,13 +465,19 @@ export class ActiveRagdollController {
     } else {
       groundRoll += Math.sin(this.totalTime * 1.5) * 0.025;
     }
+    if (env) {
+      groundRoll += env.bodyDeflectRoll; // Tilts away from side shelves!
+    }
     const targetRoll = THREE.MathUtils.lerp(groundRoll, 0, this.airborneBlend);
     const currentRoll = this.torsoRollSpring.update(targetRoll, dt);
 
-    // D. Yaw
+    // D. Yaw (Pelvis counter-twist + narrow gap squeeze angle)
     let targetYaw = 0;
     if (isMoving && this.airborneBlend < 0.5) {
       targetYaw = Math.cos(this.gaitPhase) * (isSprinting ? 0.14 : 0.08);
+    }
+    if (env) {
+      targetYaw += env.bodySqueezeYaw; // Turns shoulders sideways to slip through tight gaps!
     }
     const currentYaw = this.torsoYawSpring.update(targetYaw, dt);
 
@@ -444,14 +487,16 @@ export class ActiveRagdollController {
   /**
    * Procedural Gait Engine & True Leg IK with Ground Compensation
    */
-  private updateLegs(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean }): void {
+  private updateLegs(
+    state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean },
+    env: EnvironmentContext | null
+  ): void {
     if (!this.bones.rLeg || !this.bones.lLeg) return;
     const { dt, isMoving, isSprinting } = state;
 
     const torsoPitch = this.torsoPitchSpring.value;
     const torsoRoll = this.torsoRollSpring.value;
 
-    // Ground gait target
     let groundRPitch = -torsoPitch;
     let groundLPitch = -torsoPitch;
     let groundRRoll = -torsoRoll - 0.05;
@@ -473,9 +518,10 @@ export class ActiveRagdollController {
         groundLRoll += legWave * strafeAmp;
       }
 
+      // Parabolic step lift (Swing phase)
       const rSwing = Math.max(0, legWave * fwdFactor);
       const lSwing = Math.max(0, -legWave * fwdFactor);
-      const stepLift = isSprinting ? 0.065 : 0.04;
+      const stepLift = isSprinting ? 0.068 : 0.042;
       groundRY += rSwing * stepLift;
       groundLY += lSwing * stepLift;
     } else {
@@ -484,6 +530,12 @@ export class ActiveRagdollController {
       groundLPitch -= idleSway * 0.03;
       groundRRoll -= 0.02;
       groundLRoll += 0.02;
+    }
+
+    // Narrow gap step adjustment: bring feet closer together
+    if (env && env.squeezeFactor > 0.1) {
+      groundRRoll += 0.06 * env.squeezeFactor;
+      groundLRoll -= 0.06 * env.squeezeFactor;
     }
 
     // Airborne targets
@@ -495,7 +547,6 @@ export class ActiveRagdollController {
     const airRY = this.restRLegPos.y + 0.07;
     const airLY = this.restLLegPos.y + 0.07;
 
-    // Smooth blending between ground and air
     const rPitchTarget = THREE.MathUtils.lerp(groundRPitch, airRPitch, this.airborneBlend);
     const lPitchTarget = THREE.MathUtils.lerp(groundLPitch, airLPitch, this.airborneBlend);
     const rRollTarget = THREE.MathUtils.lerp(groundRRoll, airRRoll, this.airborneBlend);
@@ -516,14 +567,18 @@ export class ActiveRagdollController {
   }
 
   /**
-   * Floppy Active-Ragdoll Arms with Smooth Airborne Blend & Obstacle Collision
+   * Procedural Physical Arms:
+   * Dynamic shoulder tucking against torso, arm roll hug, obstacle contouring, and hand surface IK constraints.
    */
-  private updateArms(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean; isHoldingBox: boolean }): void {
+  private updateArms(
+    state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean; isHoldingBox: boolean },
+    env: EnvironmentContext | null,
+    obstacleSolver?: PhysicalObstacleSolver
+  ): void {
     if (!this.bones.rHand || !this.bones.lHand) return;
     const { dt, isMoving, isSprinting, isHoldingBox } = state;
 
     if (isHoldingBox) {
-      // Arms locked to box
       const rPitchTarget = -1.35 + this.boxOffsetPitch.value;
       const rRollTarget = -0.18 + this.boxOffsetRoll.value;
       const rYawTarget = 0.35 + this.boxOffsetYaw.value;
@@ -545,7 +600,29 @@ export class ActiveRagdollController {
       return;
     }
 
-    // 1. Ground Targets (Pendulum swing opposite to legs)
+    const tuckR = env ? env.tuckRight : 0;
+    const tuckL = env ? env.tuckLeft : 0;
+    const fwdBlock = env ? env.fwdBlock : 0;
+    const squeeze = env ? env.squeezeFactor : 0;
+
+    // 1. Procedural Shoulder Compression (Shoulders pull inward towards ribs)
+    // Right shoulder moves from -0.3516 to -0.17
+    const targetShoulderX_R = THREE.MathUtils.lerp(this.restRHandPos.x, -0.17, Math.max(tuckR, squeeze));
+    const targetShoulderZ_R = 0.05 * tuckR; // slightly moves back if dragging along shelf
+    this.currentShoulderR.x = THREE.MathUtils.lerp(this.currentShoulderR.x, targetShoulderX_R, Math.min(1, 14 * dt));
+    this.currentShoulderR.z = THREE.MathUtils.lerp(this.currentShoulderR.z, targetShoulderZ_R, Math.min(1, 14 * dt));
+    this.bones.rHand.position.x = this.currentShoulderR.x;
+    this.bones.rHand.position.z = this.currentShoulderR.z;
+
+    // Left shoulder moves from +0.3516 to +0.17
+    const targetShoulderX_L = THREE.MathUtils.lerp(this.restLHandPos.x, 0.17, Math.max(tuckL, squeeze));
+    const targetShoulderZ_L = 0.05 * tuckL;
+    this.currentShoulderL.x = THREE.MathUtils.lerp(this.currentShoulderL.x, targetShoulderX_L, Math.min(1, 14 * dt));
+    this.currentShoulderL.z = THREE.MathUtils.lerp(this.currentShoulderL.z, targetShoulderZ_L, Math.min(1, 14 * dt));
+    this.bones.lHand.position.x = this.currentShoulderL.x;
+    this.bones.lHand.position.z = this.currentShoulderL.z;
+
+    // 2. Base Ground Targets (Pendulum swing)
     const torsoPitch = this.torsoPitchSpring.value;
     let groundRPitch = -torsoPitch * 0.75;
     let groundLPitch = -torsoPitch * 0.75;
@@ -555,32 +632,53 @@ export class ActiveRagdollController {
     let groundLYaw = 0;
 
     if (isMoving) {
+      // Natural swing amplitude is squashed when tucked or squeezing
+      const swingMultiplierR = Math.max(0.05, 1 - tuckR * 0.95 - squeeze * 0.8);
+      const swingMultiplierL = Math.max(0.05, 1 - tuckL * 0.95 - squeeze * 0.8);
+
       const armSwingAmp = isSprinting ? 0.95 : 0.55;
       const armWave = Math.sin(this.gaitPhase);
-      groundRPitch += armWave * armSwingAmp;
-      groundLPitch -= armWave * armSwingAmp;
+      groundRPitch += armWave * armSwingAmp * swingMultiplierR;
+      groundLPitch -= armWave * armSwingAmp * swingMultiplierL;
 
       const centrifugalSpread = Math.abs(this.rotVelocityY) * 0.085;
-      groundRRoll -= centrifugalSpread;
-      groundLRoll += centrifugalSpread;
+      groundRRoll -= centrifugalSpread * swingMultiplierR;
+      groundLRoll += centrifugalSpread * swingMultiplierL;
 
       groundRYaw = THREE.MathUtils.clamp(this.rotVelocityY * 0.04, -0.3, 0.3);
       groundLYaw = THREE.MathUtils.clamp(this.rotVelocityY * 0.04, -0.3, 0.3);
+
+      // Trailing arm along shelf: if moving forward and tucked, arm naturally trails back
+      if (tuckR > 0.25 && this.localVelFwd > 0.1) {
+        groundRPitch += 0.55 * tuckR; // Arm bends back as it brushes along shelf
+      }
+      if (tuckL > 0.25 && this.localVelFwd > 0.1) {
+        groundLPitch += 0.55 * tuckL;
+      }
     } else {
       const idleArm = Math.sin(this.totalTime * 1.8) * 0.04;
       groundRPitch += idleArm;
       groundLPitch -= idleArm;
-
-      if (Math.abs(this.rotVelocityY) > 0.5) {
-        const spinSpread = Math.min(1.0, Math.abs(this.rotVelocityY) * 0.12);
-        groundRRoll -= spinSpread;
-        groundLRoll += spinSpread;
-        groundRPitch -= this.rotVelocityY * 0.05;
-        groundLPitch += this.rotVelocityY * 0.05;
-      }
     }
 
-    // 2. Airborne Panic Flail Targets
+    // 3. Procedural Arm Inward Tuck (Hugs ribs/waist)
+    // Right arm rolls inward: -0.15 -> +0.35 rad
+    groundRRoll = THREE.MathUtils.lerp(groundRRoll, 0.35, Math.max(tuckR, squeeze));
+    // Left arm rolls inward: +0.15 -> -0.35 rad
+    groundLRoll = THREE.MathUtils.lerp(groundLRoll, -0.35, Math.max(tuckL, squeeze));
+
+    // 4. Frontal Obstacle Reaction (Raise hands defensively / clamp forward swing)
+    if (fwdBlock > 0.15) {
+      // Clamps forward pitch and brings hands up toward chest
+      groundRPitch = THREE.MathUtils.lerp(groundRPitch, -0.72, fwdBlock);
+      groundLPitch = THREE.MathUtils.lerp(groundLPitch, -0.72, fwdBlock);
+      groundRYaw += 0.22 * fwdBlock;
+      groundLYaw -= 0.22 * fwdBlock;
+      groundRRoll = THREE.MathUtils.lerp(groundRRoll, -0.25, fwdBlock);
+      groundLRoll = THREE.MathUtils.lerp(groundLRoll, 0.25, fwdBlock);
+    }
+
+    // 5. Airborne Panic Flail Targets
     const panicTime = this.totalTime * 14;
     const airPitch = -2.35 + Math.sin(panicTime) * 0.35;
     const airRRoll = -0.75 - Math.cos(panicTime * 1.1) * 0.3;
@@ -588,7 +686,7 @@ export class ActiveRagdollController {
     const airRYaw = Math.sin(panicTime * 0.8) * 0.35;
     const airLYaw = -Math.sin(panicTime * 0.8) * 0.35;
 
-    // 3. SMOOTH AIRBORNE BLEND (Eliminates abrupt snapping after jump!)
+    // 6. Smooth Airborne Blending
     const rPitchTarget = THREE.MathUtils.lerp(groundRPitch, airPitch, this.airborneBlend);
     const lPitchTarget = THREE.MathUtils.lerp(groundLPitch, airPitch, this.airborneBlend);
     const rRollTarget = THREE.MathUtils.lerp(groundRRoll, airRRoll, this.airborneBlend);
@@ -606,12 +704,49 @@ export class ActiveRagdollController {
 
     this.bones.rHand.rotation.set(curRPitch, curRYaw, curRRoll);
     this.bones.lHand.rotation.set(curLPitch, curLYaw, curLRoll);
+
+    // 7. World-Space Hand Surface Non-Penetration IK Constraint
+    // If hand penetrates or brushes obstacle, push hand to obstacle surface!
+    if (obstacleSolver && this.bones.torso) {
+      this.bones.torso.updateMatrixWorld(true);
+
+      const torsoQuatWorld = this.bones.torso.getWorldQuaternion(this.tempQuatA);
+      const invTorsoQuat = this.tempQuatB.copy(torsoQuatWorld).invert();
+
+      // Constrain Right Hand
+      const rShoulderWorld = this.bones.rHand.getWorldPosition(this.tempVecA);
+      const rTipWorld = this.tempVecB.copy(ActiveRagdollController.TIP_LOCAL_OFFSET);
+      this.bones.rHand.localToWorld(rTipWorld);
+
+      const constrainedTip_R = obstacleSolver.constrainHandToEnvironment(rShoulderWorld, rTipWorld, 0.12);
+      if (constrainedTip_R !== rTipWorld) {
+        // Arm direction required to touch surface point
+        const targetDirWorld = this.tempVecC.subVectors(constrainedTip_R, rShoulderWorld).normalize();
+        const targetDirTorso = targetDirWorld.applyQuaternion(invTorsoQuat);
+        this.bones.rHand.quaternion.setFromUnitVectors(ActiveRagdollController.REST_ARM_DIR, targetDirTorso);
+      }
+
+      // Constrain Left Hand
+      const lShoulderWorld = this.bones.lHand.getWorldPosition(this.tempVecA);
+      const lTipWorld = this.tempVecB.copy(ActiveRagdollController.TIP_LOCAL_OFFSET);
+      this.bones.lHand.localToWorld(lTipWorld);
+
+      const constrainedTip_L = obstacleSolver.constrainHandToEnvironment(lShoulderWorld, lTipWorld, 0.12);
+      if (constrainedTip_L !== lTipWorld) {
+        const targetDirWorld = this.tempVecC.subVectors(constrainedTip_L, lShoulderWorld).normalize();
+        const targetDirTorso = targetDirWorld.applyQuaternion(invTorsoQuat);
+        this.bones.lHand.quaternion.setFromUnitVectors(ActiveRagdollController.REST_ARM_DIR, targetDirTorso);
+      }
+    }
   }
 
   /**
-   * Head Dynamics
+   * Head Dynamics & Obstacle Awareness
    */
-  private updateHead(state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean }): void {
+  private updateHead(
+    state: { dt: number; isMoving: boolean; isSprinting: boolean; isAirborne: boolean },
+    env: EnvironmentContext | null
+  ): void {
     if (!this.bones.head) return;
     const { dt, isMoving, isSprinting } = state;
     const torsoPitch = this.torsoPitchSpring.value;
@@ -631,6 +766,11 @@ export class ActiveRagdollController {
     } else {
       targetPitch += Math.sin(this.totalTime * 1.2) * 0.03;
       targetRoll = Math.sin(this.totalTime * 0.8) * 0.04;
+    }
+
+    // Tucks head slightly when squeezing
+    if (env && env.squeezeFactor > 0.15) {
+      targetPitch += 0.18 * env.squeezeFactor;
     }
 
     const curPitch = this.headPitchSpring.update(targetPitch, dt);

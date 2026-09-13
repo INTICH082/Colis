@@ -42,10 +42,11 @@ export class EnvironmentCollisionManager {
 
       const cooldownKey = `${player.id}_${limb.name}`;
       const lastHit = this.lastHitTimes.get(cooldownKey) || 0;
-      if (now - lastHit < 0.28) continue; // 280ms cooldown between hits on the same limb
+      // Only trigger hard impact recoil on high-speed sprint collisions or direct head/torso hits
+      if (speed < 4.0 && (limb.name === 'rHand' || limb.name === 'lHand')) continue;
 
       let hit = false;
-      let hitForce = Math.max(0.6, speed * 0.25);
+      let hitForce = Math.max(0.6, speed * 0.3);
 
       // 1. Check against shelves
       for (const shelf of Object.values(shelves)) {

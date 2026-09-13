@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PlayerState } from '@colis/shared';
 import { ActiveRagdollController, CharacterBones } from './ActiveRagdollController';
+import { PhysicalObstacleSolver } from '../physics/PhysicalObstacleSolver';
 
 interface LoadedCharacterAssets {
   scene: THREE.Group;
@@ -231,7 +232,8 @@ export class PlayerEntity {
     isSprinting: boolean,
     isAirborne: boolean = false,
     moveX: number = 0,
-    moveZ: number = 0
+    moveZ: number = 0,
+    obstacleSolver?: PhysicalObstacleSolver
   ): void {
     if (this.ragdoll) {
       // If knocked down, apply sliding momentum
@@ -240,7 +242,7 @@ export class PlayerEntity {
         this.targetPosition.copy(this.group.position);
       }
 
-      // Pure Procedural Active Ragdoll Physics (TABS style)
+      // Pure Procedural Active Ragdoll Physics (TABS style) with continuous environment obstacle solver
       this.ragdoll.update({
         dt,
         isMoving,
@@ -250,6 +252,8 @@ export class PlayerEntity {
         worldMoveZ: moveZ,
         playerRotationY: this.group.rotation.y,
         isHoldingBox: this.heldBoxMesh.visible,
+        playerWorldPos: this.group.position,
+        obstacleSolver,
       });
 
       // Dynamic Held Box Inertia & Mass Momentum
@@ -267,7 +271,7 @@ export class PlayerEntity {
   /**
    * Interpolation and animation update for remote multiplayer players
    */
-  public tickInterpolation(dt: number, isLocal: boolean): void {
+  public tickInterpolation(dt: number, isLocal: boolean, obstacleSolver?: PhysicalObstacleSolver): void {
     if (!isLocal) {
       // Smooth lerp for remote players
       this.group.position.lerp(this.targetPosition, 15 * dt);
@@ -289,7 +293,7 @@ export class PlayerEntity {
       const isSprinting = speed > 5.2;
       const isAirborne = this.group.position.y > 0.18;
 
-      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ);
+      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ, obstacleSolver);
     }
   }
 
