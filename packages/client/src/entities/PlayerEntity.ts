@@ -212,6 +212,16 @@ export class PlayerEntity {
     }
   }
 
+  public knockdown(impulse: THREE.Vector3, force: number = 1.0): void {
+    if (this.ragdoll) {
+      this.ragdoll.triggerKnockdown(impulse, force);
+    }
+  }
+
+  public isKnockedDown(): boolean {
+    return this.ragdoll ? this.ragdoll.status !== 'ACTIVE' : false;
+  }
+
   /**
    * Main tick for local player procedural physics updates (100% Pure IK + Ragdoll, NO animations)
    */
@@ -224,6 +234,12 @@ export class PlayerEntity {
     moveZ: number = 0
   ): void {
     if (this.ragdoll) {
+      // If knocked down, apply sliding momentum
+      if (this.ragdoll.status === 'KNOCKED_DOWN' && this.ragdoll.slideVelocity.lengthSq() > 0.01) {
+        this.group.position.addScaledVector(this.ragdoll.slideVelocity, dt);
+        this.targetPosition.copy(this.group.position);
+      }
+
       // Pure Procedural Active Ragdoll Physics (TABS style)
       this.ragdoll.update({
         dt,

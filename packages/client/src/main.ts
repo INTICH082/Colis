@@ -18,6 +18,7 @@ import { InstancedShelfManager } from './render/InstancedShelfManager.js';
 import { BoxEntityManager } from './entities/BoxEntityManager.js';
 import { PlayerEntity } from './entities/PlayerEntity.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
+import { EnvironmentCollisionManager } from './physics/EnvironmentCollisionManager.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIOverlay } from './ui/UIOverlay.js';
 
@@ -25,6 +26,8 @@ class ColisGame {
   private canvas: HTMLCanvasElement;
   private renderer: GameRenderer;
   private physics: PhysicsWorld;
+  private envCollision: EnvironmentCollisionManager;
+  private lastTackleTime: number = 0;
   private environment: StoreEnvironment;
   private shelfManager: InstancedShelfManager;
   private boxManager: BoxEntityManager;
@@ -64,6 +67,7 @@ class ColisGame {
     this.shelfManager = new InstancedShelfManager(this.renderer.scene);
     this.boxManager = new BoxEntityManager(this.renderer.scene);
     this.physics = new PhysicsWorld();
+    this.envCollision = new EnvironmentCollisionManager();
     this.ui = new UIOverlay();
 
     // Determine WS server URL (uses current hostname, port 8080)
@@ -79,6 +83,17 @@ class ColisGame {
       onShelfChanged: this.handleShelfChanged,
       onEconomyChanged: this.handleEconomyChanged,
       onNotification: (n) => this.ui.showNotification(n),
+      onPlayerTackled: (data) => {
+        const isLocalVictim = data.victimId === this.localPlayerId;
+        const victim = isLocalVictim ? this.localPlayerEntity : this.remotePlayers.get(data.victimId);
+        if (victim) {
+          victim.knockdown(new THREE.Vector3(data.impulseX, 0, data.impulseZ), data.force || 1.0);
+          this.ui.showNotification({
+            type: 'warning',
+            message: isLocalVictim ? 'Тебя сбили с ног в рэгдолл!' : 'Игрока сбили с ног!',
+          });
+        }
+      },
       onConnectionStatus: (connected) => {
         if (!connected) {
           this.ui.showNotification({
@@ -394,6 +409,33 @@ class ColisGame {
   };
 
   private updatePlayerMovement(dt: number): void {
+    // If local player is knocked down / getting up, disable input and apply sliding physics
+    if (this.localPlayerEntity?.isKnockedDown()) {
+      this.localPlayerEntity.tick(dt, false, false, false, 0, 0);
+      const slidPos = this.localPlayerEntity.group.position;
+      this.localPlayerState.position.x = slidPos.x;
+      this.localPlayerState.position.y = slidPos.y;
+      this.localPlayerState.position.z = slidPos.z;
+      this.physics.playerBody.setNextKinematicTranslation(slidPos);
+
+      this.networkSendTimer += dt;
+      if (this.networkSendTimer >= 0.04) {
+        this.networkSendTimer = 0;
+        this.network.sendInput({
+          position: {
+            x: Number(slidPos.x.toFixed(3)),
+            y: Number(slidPos.y.toFixed(3)),
+            z: Number(slidPos.z.toFixed(3)),
+          },
+          rotationY: Number(this.localPlayerState.rotationY.toFixed(3)),
+          isMoving: false,
+          isSprinting: false,
+          deltaMs: 40,
+        });
+      }
+      return;
+    }
+
     let inputX = 0;
     let inputZ = 0;
 
@@ -448,12 +490,52 @@ class ColisGame {
     // Player is only considered airborne when clearly elevated above floor
     const isAirborne = !this.isGrounded && newPos.y > 0.15;
 
-    // Sync visual player mesh and animations
+    // Sync visual player mesh and procedural ragdoll
     if (this.localPlayerEntity) {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
       this.localPlayerEntity.tick(dt, isMoving, isSprinting, isAirborne, worldDir.x, worldDir.z);
+    }
+
+    const nowSec = performance.now() / 1000;
+
+    // Check Player-vs-Player Sprint Tackle
+    if (isSprinting && isMoving && speed > 5.2 && nowSec - this.lastTackleTime > 1.2) {
+      for (const [remoteId, remotePlayer] of this.remotePlayers.entries()) {
+        if (remotePlayer.isKnockedDown()) continue;
+        const distToOther = Math.hypot(
+          newPos.x - remotePlayer.group.position.x,
+          newPos.z - remotePlayer.group.position.z
+        );
+        if (distToOther < 0.95) {
+          this.lastTackleTime = nowSec;
+          const tackleImpulse = new THREE.Vector3(worldDir.x, 0, worldDir.z).normalize();
+          remotePlayer.knockdown(tackleImpulse, 1.4);
+          this.network.sendPlayerTackle(remoteId, tackleImpulse.x, tackleImpulse.z, 1.4);
+
+          // Local player impact recoil
+          if (this.localPlayerEntity?.ragdoll) {
+            this.localPlayerEntity.ragdoll.torsoPitchSpring.impulse(-2.2);
+            this.localPlayerEntity.ragdoll.torsoYSpring.impulse(-1.2);
+          }
+          this.ui.showNotification({
+            type: 'success',
+            message: '💥 Ты с разбега сбил игрока в рэгдолл!',
+          });
+          break;
+        }
+      }
+    }
+
+    // Check Limb vs Environment Collisions (Shelves & Walls)
+    if (this.currentRoom && this.localPlayerEntity) {
+      this.envCollision.checkCollisions(
+        this.localPlayerEntity,
+        this.currentRoom.shelves,
+        speed,
+        nowSec
+      );
     }
 
     // Send input to server at tick rate (~25Hz)
@@ -578,8 +660,12 @@ class ColisGame {
   }
 
   private updateInterpolations(dt: number): void {
+    const nowSec = performance.now() / 1000;
     for (const remote of this.remotePlayers.values()) {
       remote.tickInterpolation(dt, false);
+      if (this.currentRoom) {
+        this.envCollision.checkCollisions(remote, this.currentRoom.shelves, 3.5, nowSec);
+      }
     }
   }
 }

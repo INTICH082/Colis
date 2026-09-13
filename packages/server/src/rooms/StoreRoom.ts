@@ -9,6 +9,7 @@ import {
   OrderDeliveryPayload,
   PlayerInputPayload,
   PlayerState,
+  PlayerTacklePayload,
   PRODUCTS,
   RoomState,
   ServerMessage,
@@ -303,6 +304,32 @@ export class StoreRoom {
       case ClientOpCode.ORDER_DELIVERY:
         this.handleOrderDelivery(playerId, message.data);
         break;
+
+      case ClientOpCode.PLAYER_TACKLE:
+        this.handlePlayerTackle(playerId, message.data);
+        break;
+    }
+  }
+
+  private handlePlayerTackle(playerId: string, data: PlayerTacklePayload): void {
+    if (!data.victimId || data.victimId === playerId) return;
+
+    // Broadcast tackle event to all players in the room
+    this.broadcast({
+      op: ServerOpCode.PLAYER_TACKLED,
+      data: {
+        attackerId: playerId,
+        victimId: data.victimId,
+        impulseX: data.impulseX,
+        impulseZ: data.impulseZ,
+        force: data.force || 1.0,
+      },
+    });
+
+    // If the victim was holding a box, drop it!
+    const victim = this.players.get(data.victimId);
+    if (victim && victim.state.heldBoxId) {
+      this.handleDropBox(data.victimId);
     }
   }
 

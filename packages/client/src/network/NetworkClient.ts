@@ -6,6 +6,7 @@ import {
   NotificationPayload,
   PlayerInputPayload,
   PlayerState,
+  PlayerTacklePayload,
   RoomState,
   ServerMessage,
   ServerOpCode,
@@ -24,6 +25,7 @@ export interface NetworkCallbacks {
   onEconomyChanged: (data: { storeMoney: number; storeLevel: number }) => void;
   onNotification: (notif: NotificationPayload) => void;
   onConnectionStatus: (connected: boolean) => void;
+  onPlayerTackled?: (data: PlayerTacklePayload) => void;
 }
 
 export class NetworkClient {
@@ -140,7 +142,23 @@ export class NetworkClient {
           message: msg.data.reason,
         });
         break;
+      case ServerOpCode.PLAYER_TACKLED:
+        this.callbacks.onPlayerTackled?.(msg.data);
+        break;
     }
+  }
+
+  public sendPlayerTackle(victimId: string, impulseX: number, impulseZ: number, force: number = 1.0): void {
+    this.send({
+      op: ClientOpCode.PLAYER_TACKLE,
+      data: {
+        attackerId: '',
+        victimId,
+        impulseX,
+        impulseZ,
+        force,
+      },
+    });
   }
 
   public sendInput(input: Omit<PlayerInputPayload, 'sequence'>): number {

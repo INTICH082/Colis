@@ -10,6 +10,7 @@ export enum ClientOpCode {
   INTERACT_PLACE_PRODUCT = 'INTERACT_PLACE_PRODUCT',
   INTERACT_TAKE_PRODUCT = 'INTERACT_TAKE_PRODUCT',
   ORDER_DELIVERY = 'ORDER_DELIVERY',
+  PLAYER_TACKLE = 'PLAYER_TACKLE',
 }
 
 export enum ServerOpCode {
@@ -22,6 +23,7 @@ export enum ServerOpCode {
   STORE_ECONOMY_CHANGED = 'STORE_ECONOMY_CHANGED',
   ACTION_REJECTED = 'ACTION_REJECTED',
   NOTIFICATION = 'NOTIFICATION',
+  PLAYER_TACKLED = 'PLAYER_TACKLED',
 }
 
 // Client -> Server
@@ -70,6 +72,14 @@ export interface OrderDeliveryPayload {
   quantity: number; // number of boxes
 }
 
+export interface PlayerTacklePayload {
+  attackerId: string;
+  victimId: string;
+  impulseX: number;
+  impulseZ: number;
+  force?: number;
+}
+
 export type ClientMessage =
   | { op: ClientOpCode.JOIN_ROOM; data: JoinRoomPayload }
   | { op: ClientOpCode.LEAVE_ROOM }
@@ -79,7 +89,8 @@ export type ClientMessage =
   | { op: ClientOpCode.INTERACT_BOX_OPEN; data: InteractBoxOpenPayload }
   | { op: ClientOpCode.INTERACT_PLACE_PRODUCT; data: InteractPlaceProductPayload }
   | { op: ClientOpCode.INTERACT_TAKE_PRODUCT; data: InteractTakeProductPayload }
-  | { op: ClientOpCode.ORDER_DELIVERY; data: OrderDeliveryPayload };
+  | { op: ClientOpCode.ORDER_DELIVERY; data: OrderDeliveryPayload }
+  | { op: ClientOpCode.PLAYER_TACKLE; data: PlayerTacklePayload };
 
 // Server -> Client
 export interface InitRoomPayload {
@@ -122,4 +133,5 @@ export type ServerMessage =
   | { op: ServerOpCode.SHELF_STATE_CHANGED; data: ShelfState }
   | { op: ServerOpCode.STORE_ECONOMY_CHANGED; data: { storeMoney: number; storeLevel: number } }
   | { op: ServerOpCode.ACTION_REJECTED; data: ActionRejectedPayload }
-  | { op: ServerOpCode.NOTIFICATION; data: NotificationPayload };
+  | { op: ServerOpCode.NOTIFICATION; data: NotificationPayload }
+  | { op: ServerOpCode.PLAYER_TACKLED; data: PlayerTacklePayload };
