@@ -18,6 +18,7 @@ export class PlayerEntity {
   private mixer: THREE.AnimationMixer | null = null;
   private actions: Map<string, THREE.AnimationAction> = new Map();
   private currentActionName: string = 'idle';
+  private currentDirection: 'forward' | 'back' | 'left' | 'right' = 'forward';
 
   private nameSprite!: THREE.Sprite;
   private heldBoxMesh!: THREE.Group;
@@ -116,8 +117,8 @@ export class PlayerEntity {
     // Clone skinned mesh and skeleton safely
     this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
     this.modelRoot.position.set(0, 0, 0);
-    // Rotate 180 degrees to face forward properly with movement and aim
-    this.modelRoot.rotation.y = Math.PI;
+    // Base orientation (0): Blockbench model Root node already contains the proper 180° rotation
+    this.modelRoot.rotation.y = 0;
     this.group.add(this.modelRoot);
 
     // Setup animation mixer
@@ -154,9 +155,13 @@ export class PlayerEntity {
     if (!this.mixer || this.currentActionName === animName) return;
 
     const prevAction = this.actions.get(this.currentActionName);
-    const nextAction = this.actions.get(animName);
+    let nextAction = this.actions.get(animName);
 
-    if (!nextAction) return;
+    if (!nextAction) {
+      if (animName.startsWith('run')) nextAction = this.actions.get('run');
+      else if (animName.startsWith('walk')) nextAction = this.actions.get('walk');
+      if (!nextAction) return;
+    }
 
     // Jump should always start from frame 0 (liftoff).
     // Looping animations (idle/walk/run) only reset if stopped or disabled,
@@ -243,9 +248,56 @@ export class PlayerEntity {
   }
 
   /**
+   * Determines relative 4-way movement direction ('forward' | 'back' | 'left' | 'right')
+   * in the character's local coordinate system with hysteresis.
+   */
+  private computeMovementDirection(moveX: number, moveZ: number): 'forward' | 'back' | 'left' | 'right' {
+    const moveLen = Math.hypot(moveX, moveZ);
+    if (moveLen < 0.001) {
+      return this.currentDirection;
+    }
+
+    const normX = moveX / moveLen;
+    const normZ = moveZ / moveLen;
+
+    const rotY = this.group.rotation.y;
+    // Local forward vector in world space: (-sin(rotY), -cos(rotY))
+    // Local right vector in world space: (cos(rotY), -sin(rotY))
+    const forwardDot = -normX * Math.sin(rotY) - normZ * Math.cos(rotY);
+    const rightDot = normX * Math.cos(rotY) - normZ * Math.sin(rotY);
+
+    // Hysteresis bias (+0.15) to maintain the current direction and avoid rapid flapping on diagonals
+    const bias = 0.15;
+    const fwdScore = forwardDot + (this.currentDirection === 'forward' ? bias : 0);
+    const backScore = -forwardDot + (this.currentDirection === 'back' ? bias : 0);
+    const rightScore = rightDot + (this.currentDirection === 'right' ? bias : 0);
+    const leftScore = -rightDot + (this.currentDirection === 'left' ? bias : 0);
+
+    const maxScore = Math.max(fwdScore, backScore, rightScore, leftScore);
+    if (maxScore === fwdScore) {
+      this.currentDirection = 'forward';
+    } else if (maxScore === backScore) {
+      this.currentDirection = 'back';
+    } else if (maxScore === rightScore) {
+      this.currentDirection = 'right';
+    } else {
+      this.currentDirection = 'left';
+    }
+
+    return this.currentDirection;
+  }
+
+  /**
    * Main tick for local player animation updates
    */
-  public tick(dt: number, isMoving: boolean, isSprinting: boolean, isAirborne: boolean = false): void {
+  public tick(
+    dt: number,
+    isMoving: boolean,
+    isSprinting: boolean,
+    isAirborne: boolean = false,
+    moveX: number = 0,
+    moveZ: number = 0
+  ): void {
     if (this.mixer) {
       this.mixer.update(dt);
     }
@@ -253,11 +305,42 @@ export class PlayerEntity {
     if (isAirborne) {
       this.fadeToAnimation('jump', 0.18);
     } else if (isMoving) {
+      const dir = this.computeMovementDirection(moveX, moveZ);
+      let targetAnim = 'walk';
+
       if (isSprinting) {
-        this.fadeToAnimation('run', 0.22);
+        switch (dir) {
+          case 'forward':
+            targetAnim = 'run';
+            break;
+          case 'back':
+            targetAnim = 'run_back';
+            break;
+          case 'left':
+            targetAnim = 'run_left';
+            break;
+          case 'right':
+            targetAnim = 'run_right';
+            break;
+        }
       } else {
-        this.fadeToAnimation('walk', 0.22);
+        switch (dir) {
+          case 'forward':
+            targetAnim = 'walk';
+            break;
+          case 'back':
+            targetAnim = 'walk_back';
+            break;
+          case 'left':
+            targetAnim = 'walk_left';
+            break;
+          case 'right':
+            targetAnim = 'walk_right';
+            break;
+        }
       }
+
+      this.fadeToAnimation(targetAnim, 0.2);
     } else {
       this.fadeToAnimation('idle', 0.25);
     }
@@ -278,7 +361,9 @@ export class PlayerEntity {
       this.group.rotation.y += diff * 15 * dt;
 
       // Determine movement state from velocity
-      const distMoved = this.group.position.distanceTo(this.lastPosition);
+      const moveX = this.group.position.x - this.lastPosition.x;
+      const moveZ = this.group.position.z - this.lastPosition.z;
+      const distMoved = Math.hypot(moveX, moveZ);
       const speed = distMoved / Math.max(dt, 0.001);
       this.lastPosition.copy(this.group.position);
 
@@ -286,7 +371,7 @@ export class PlayerEntity {
       const isSprinting = speed > 5.2;
       const isAirborne = this.group.position.y > 0.18;
 
-      this.tick(dt, isMoving, isSprinting, isAirborne);
+      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ);
     }
   }
 

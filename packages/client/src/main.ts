@@ -453,7 +453,7 @@ class ColisGame {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
       this.localPlayerEntity.updateState(this.localPlayerState, true);
-      this.localPlayerEntity.tick(dt, isMoving, isSprinting, isAirborne);
+      this.localPlayerEntity.tick(dt, isMoving, isSprinting, isAirborne, worldDir.x, worldDir.z);
     }
 
     // Send input to server at tick rate (~25Hz)
