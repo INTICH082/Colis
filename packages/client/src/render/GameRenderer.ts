@@ -18,15 +18,16 @@ export class GameRenderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f172a);
-    this.scene.fog = new THREE.FogExp2(0x0f172a, 0.018);
+    this.scene.background = new THREE.Color(0xcde3f5);
+    // Linear fog ensures zero fogging in store interior while blending distant ocean into sky horizon
+    this.scene.fog = new THREE.Fog(0xcde3f5, 120, 700);
 
-    // Camera: FOV 38 provides a clean isometric aesthetic without distortion
+    // Camera: FOV 38 provides a clean isometric aesthetic without distortion; far 1200 covers horizon
     this.camera = new THREE.PerspectiveCamera(
       38,
       window.innerWidth / window.innerHeight,
       0.1,
-      200
+      1200
     );
     this.updateCameraTransform(this.currentCameraTarget);
 

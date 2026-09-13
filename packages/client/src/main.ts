@@ -13,6 +13,7 @@ import {
   distanceXZ,
 } from '@colis/shared';
 import { GameRenderer } from './render/GameRenderer.js';
+import { AtmosphereManager } from './render/AtmosphereManager.js';
 import { StoreEnvironment } from './render/StoreEnvironment.js';
 import { InstancedShelfManager } from './render/InstancedShelfManager.js';
 import { BoxEntityManager } from './entities/BoxEntityManager.js';
@@ -24,6 +25,7 @@ import { UIOverlay } from './ui/UIOverlay.js';
 class ColisGame {
   private canvas: HTMLCanvasElement;
   private renderer: GameRenderer;
+  private atmosphere: AtmosphereManager;
   private physics: PhysicsWorld;
   private lastTackleTime: number = 0;
   private environment: StoreEnvironment;
@@ -65,6 +67,7 @@ class ColisGame {
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.renderer = new GameRenderer(this.canvas);
+    this.atmosphere = new AtmosphereManager(this.renderer.scene, this.renderer.dirLight);
     this.environment = new StoreEnvironment(this.renderer.scene);
     this.shelfManager = new InstancedShelfManager(this.renderer.scene);
     this.boxManager = new BoxEntityManager(this.renderer.scene);
@@ -464,6 +467,9 @@ class ColisGame {
     if (this.localPlayerEntity) {
       this.renderer.updateCamera(this.localPlayerEntity.group.position, dt);
     }
+
+    // Update sky dome and ocean waves
+    this.atmosphere.update(dt, this.renderer.camera.position);
 
     // Render 3D Scene
     this.renderer.render();
