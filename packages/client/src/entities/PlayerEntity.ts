@@ -3,7 +3,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PlayerState } from '@colis/shared';
 import { ActiveRagdollController, CharacterBones } from './ActiveRagdollController';
-import { PhysicalObstacleSolver } from '../physics/PhysicalObstacleSolver';
 
 interface LoadedCharacterAssets {
   scene: THREE.Group;
@@ -26,6 +25,7 @@ export class PlayerEntity {
   private targetPosition: THREE.Vector3 = new THREE.Vector3();
   private lastPosition: THREE.Vector3 = new THREE.Vector3();
   private targetRotationY: number = 0;
+  public isHoldingBox: boolean = false;
 
   /**
    * Preloads character 3D model and animations once for all players.
@@ -205,12 +205,8 @@ export class PlayerEntity {
       this.targetRotationY = state.rotationY;
     }
 
-    // Held box visibility
-    if (state.heldBoxId) {
-      this.heldBoxMesh.visible = true;
-    } else {
-      this.heldBoxMesh.visible = false;
-    }
+    // Held box state
+    this.isHoldingBox = !!state.heldBoxId;
   }
 
   public knockdown(impulse: THREE.Vector3, force: number = 1.0): void {
@@ -232,8 +228,7 @@ export class PlayerEntity {
     isSprinting: boolean,
     isAirborne: boolean = false,
     moveX: number = 0,
-    moveZ: number = 0,
-    obstacleSolver?: PhysicalObstacleSolver
+    moveZ: number = 0
   ): void {
     if (this.ragdoll) {
       // If knocked down, apply sliding momentum
@@ -242,7 +237,7 @@ export class PlayerEntity {
         this.targetPosition.copy(this.group.position);
       }
 
-      // Pure Procedural Active Ragdoll Physics (TABS style) with continuous environment obstacle solver
+      // Pure Procedural Active Ragdoll Physics (TABS style)
       this.ragdoll.update({
         dt,
         isMoving,
@@ -251,13 +246,15 @@ export class PlayerEntity {
         worldMoveX: moveX,
         worldMoveZ: moveZ,
         playerRotationY: this.group.rotation.y,
-        isHoldingBox: this.heldBoxMesh.visible,
-        playerWorldPos: this.group.position,
-        obstacleSolver,
+        isHoldingBox: this.isHoldingBox,
       });
 
-      // Dynamic Held Box Inertia & Mass Momentum
-      if (this.heldBoxMesh.visible) {
+      // Smooth Held Box Visibility & Dynamic Mass Momentum
+      const isBoxVisible = this.isHoldingBox || this.ragdoll.boxHoldBlend > 0.03;
+      this.heldBoxMesh.visible = isBoxVisible;
+      if (isBoxVisible) {
+        const boxScale = THREE.MathUtils.lerp(0.5, 1.0, this.ragdoll.boxHoldBlend);
+        this.heldBoxMesh.scale.setScalar(boxScale);
         this.heldBoxMesh.position.set(0, 0.75 + this.ragdoll.boxOffsetY.value, -0.45);
         this.heldBoxMesh.rotation.set(
           this.ragdoll.boxOffsetPitch.value,
@@ -271,7 +268,7 @@ export class PlayerEntity {
   /**
    * Interpolation and animation update for remote multiplayer players
    */
-  public tickInterpolation(dt: number, isLocal: boolean, obstacleSolver?: PhysicalObstacleSolver): void {
+  public tickInterpolation(dt: number, isLocal: boolean): void {
     if (!isLocal) {
       // Smooth lerp for remote players
       this.group.position.lerp(this.targetPosition, 15 * dt);
@@ -293,7 +290,7 @@ export class PlayerEntity {
       const isSprinting = speed > 5.2;
       const isAirborne = this.group.position.y > 0.18;
 
-      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ, obstacleSolver);
+      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ);
     }
   }
 
