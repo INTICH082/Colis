@@ -15,13 +15,8 @@ export class PlayerEntity {
 
   public id: string;
   public group: THREE.Group;
-  public useRagdoll: boolean = true;
   public ragdoll: ActiveRagdollController | null = null;
   private modelRoot: THREE.Group | null = null;
-  private mixer: THREE.AnimationMixer | null = null;
-  private actions: Map<string, THREE.AnimationAction> = new Map();
-  private currentActionName: string = 'idle';
-  private currentDirection: 'forward' | 'back' | 'left' | 'right' = 'forward';
 
   private nameSprite!: THREE.Sprite;
   private heldBoxMesh!: THREE.Group;
@@ -140,29 +135,7 @@ export class PlayerEntity {
     });
 
     this.ragdoll = new ActiveRagdollController(bones);
-    console.log(`[PlayerEntity] Pure IK + Ragdoll initialized for player ${this.id} with parts:`, Object.keys(bones));
-
-    // Setup animation mixer as fallback or for manual toggle
-    this.mixer = new THREE.AnimationMixer(this.modelRoot);
-    assets.animations.forEach((clip) => {
-      const action = this.mixer!.clipAction(clip);
-      if (clip.name === 'jump') {
-        action.setLoop(THREE.LoopOnce, 1);
-        action.clampWhenFinished = true;
-      } else {
-        action.setLoop(THREE.LoopRepeat, Infinity);
-      }
-      this.actions.set(clip.name, action);
-    });
-
-    // Start with idle only if not using active ragdoll
-    if (!this.useRagdoll) {
-      const idleAction = this.actions.get('idle');
-      if (idleAction) {
-        idleAction.play();
-        this.currentActionName = 'idle';
-      }
-    }
+    console.log(`[PlayerEntity] PURE PROCEDURAL IK + RAGDOLL ACTIVE (ZERO ANIMATIONS) for player ${this.id} with parts:`, Object.keys(bones));
   }
 
   private buildFallbackGeometry(): void {
@@ -174,37 +147,6 @@ export class PlayerEntity {
     this.group.add(mesh);
   }
 
-  public fadeToAnimation(animName: string, duration: number = 0.22): void {
-    if (!this.mixer || this.currentActionName === animName) return;
-
-    const prevAction = this.actions.get(this.currentActionName);
-    let nextAction = this.actions.get(animName);
-
-    if (!nextAction) {
-      if (animName.startsWith('run')) nextAction = this.actions.get('run');
-      else if (animName.startsWith('walk')) nextAction = this.actions.get('walk');
-      if (!nextAction) return;
-    }
-
-    // Jump should always start from frame 0 (liftoff).
-    // Looping animations (idle/walk/run) only reset if stopped or disabled,
-    // ensuring smooth motion continuity without popping or stuttering.
-    if (animName === 'jump' || !nextAction.isRunning() || !nextAction.enabled) {
-      nextAction.reset();
-    }
-
-    nextAction.enabled = true;
-    nextAction.setEffectiveTimeScale(1);
-
-    if (prevAction && prevAction !== nextAction) {
-      prevAction.crossFadeTo(nextAction, duration, false);
-    } else {
-      nextAction.fadeIn(duration);
-    }
-
-    nextAction.play();
-    this.currentActionName = animName;
-  }
 
   private createNameSprite(name: string, color: string, isLocal: boolean): THREE.Sprite {
     const canvas = document.createElement('canvas');
@@ -271,47 +213,7 @@ export class PlayerEntity {
   }
 
   /**
-   * Determines relative 4-way movement direction ('forward' | 'back' | 'left' | 'right')
-   * in the character's local coordinate system with hysteresis.
-   */
-  private computeMovementDirection(moveX: number, moveZ: number): 'forward' | 'back' | 'left' | 'right' {
-    const moveLen = Math.hypot(moveX, moveZ);
-    if (moveLen < 0.001) {
-      return this.currentDirection;
-    }
-
-    const normX = moveX / moveLen;
-    const normZ = moveZ / moveLen;
-
-    const rotY = this.group.rotation.y;
-    // Local forward vector in world space: (-sin(rotY), -cos(rotY))
-    // Local right vector in world space: (cos(rotY), -sin(rotY))
-    const forwardDot = -normX * Math.sin(rotY) - normZ * Math.cos(rotY);
-    const rightDot = normX * Math.cos(rotY) - normZ * Math.sin(rotY);
-
-    // Hysteresis bias (+0.15) to maintain the current direction and avoid rapid flapping on diagonals
-    const bias = 0.15;
-    const fwdScore = forwardDot + (this.currentDirection === 'forward' ? bias : 0);
-    const backScore = -forwardDot + (this.currentDirection === 'back' ? bias : 0);
-    const rightScore = rightDot + (this.currentDirection === 'right' ? bias : 0);
-    const leftScore = -rightDot + (this.currentDirection === 'left' ? bias : 0);
-
-    const maxScore = Math.max(fwdScore, backScore, rightScore, leftScore);
-    if (maxScore === fwdScore) {
-      this.currentDirection = 'forward';
-    } else if (maxScore === backScore) {
-      this.currentDirection = 'back';
-    } else if (maxScore === rightScore) {
-      this.currentDirection = 'right';
-    } else {
-      this.currentDirection = 'left';
-    }
-
-    return this.currentDirection;
-  }
-
-  /**
-   * Main tick for local player animation updates
+   * Main tick for local player procedural physics updates (100% Pure IK + Ragdoll, NO animations)
    */
   public tick(
     dt: number,
@@ -321,8 +223,8 @@ export class PlayerEntity {
     moveX: number = 0,
     moveZ: number = 0
   ): void {
-    if (this.useRagdoll && this.ragdoll) {
-      // 1. Procedural Active Ragdoll Physics (TABS style)
+    if (this.ragdoll) {
+      // Pure Procedural Active Ragdoll Physics (TABS style)
       this.ragdoll.update({
         dt,
         isMoving,
@@ -334,7 +236,7 @@ export class PlayerEntity {
         isHoldingBox: this.heldBoxMesh.visible,
       });
 
-      // 2. Dynamic Held Box Inertia & Sway
+      // Dynamic Held Box Inertia & Mass Momentum
       if (this.heldBoxMesh.visible) {
         this.heldBoxMesh.position.set(0, 0.75 + this.ragdoll.boxOffsetY.value, -0.45);
         this.heldBoxMesh.rotation.set(
@@ -343,60 +245,6 @@ export class PlayerEntity {
           this.ragdoll.boxOffsetRoll.value
         );
       }
-      return;
-    }
-
-    // Standard: Baked animation mixer
-    if (this.heldBoxMesh.visible) {
-      this.heldBoxMesh.position.set(0, 0.75, -0.45);
-      this.heldBoxMesh.rotation.set(0, 0, 0);
-    }
-
-    if (this.mixer) {
-      this.mixer.update(dt);
-    }
-
-    if (isAirborne) {
-      this.fadeToAnimation('jump', 0.18);
-    } else if (isMoving) {
-      const dir = this.computeMovementDirection(moveX, moveZ);
-      let targetAnim = 'walk';
-
-      if (isSprinting) {
-        switch (dir) {
-          case 'forward':
-            targetAnim = 'run';
-            break;
-          case 'back':
-            targetAnim = 'run_back';
-            break;
-          case 'left':
-            targetAnim = 'run_left';
-            break;
-          case 'right':
-            targetAnim = 'run_right';
-            break;
-        }
-      } else {
-        switch (dir) {
-          case 'forward':
-            targetAnim = 'walk';
-            break;
-          case 'back':
-            targetAnim = 'walk_back';
-            break;
-          case 'left':
-            targetAnim = 'walk_left';
-            break;
-          case 'right':
-            targetAnim = 'walk_right';
-            break;
-        }
-      }
-
-      this.fadeToAnimation(targetAnim, 0.2);
-    } else {
-      this.fadeToAnimation('idle', 0.25);
     }
   }
 
