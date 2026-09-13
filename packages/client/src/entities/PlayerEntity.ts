@@ -117,8 +117,8 @@ export class PlayerEntity {
     // Clone skinned mesh and skeleton safely
     this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
     this.modelRoot.position.set(0, 0, 0);
-    // Base orientation (0): Blockbench model Root node already contains the proper 180° rotation
-    this.modelRoot.rotation.y = 0;
+    // Rotate 180 degrees to face forward properly with movement, aim, and hands
+    this.modelRoot.rotation.y = Math.PI;
     this.group.add(this.modelRoot);
 
     // Setup animation mixer
