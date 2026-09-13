@@ -38,7 +38,7 @@ export class PlayerEntity {
     this.loadPromise = new Promise<LoadedCharacterAssets>((resolve, reject) => {
       const loader = new GLTFLoader();
       loader.load(
-        '/models/characters/colis.glb',
+        `/models/characters/colis.glb?v=${Date.now()}`,
         (gltf) => {
           // Configure textures and shadows
           gltf.scene.traverse((child) => {
@@ -117,8 +117,8 @@ export class PlayerEntity {
     // Clone skinned mesh and skeleton safely
     this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
     this.modelRoot.position.set(0, 0, 0);
-    // Rotate 180 degrees to face forward properly with movement, aim, and hands
-    this.modelRoot.rotation.y = Math.PI;
+    // Base orientation (0): Root bone in new model is already oriented correctly
+    this.modelRoot.rotation.y = 0;
     this.group.add(this.modelRoot);
 
     // Setup animation mixer

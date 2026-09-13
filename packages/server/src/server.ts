@@ -84,6 +84,9 @@ const server = http.createServer((req, res) => {
     if (filePath.startsWith(CLIENT_DIST) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.writeHead(200, { 'Content-Type': contentType });
       if (req.method === 'HEAD') {
         res.end();
