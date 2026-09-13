@@ -209,9 +209,9 @@ export class PlayerEntity {
     this.isHoldingBox = !!state.heldBoxId;
   }
 
-  public knockdown(impulse: THREE.Vector3, force: number = 1.0): void {
+  public knockdown(impulse: THREE.Vector3, force: number = 1.0, duration: number = 3.0): void {
     if (this.ragdoll) {
-      this.ragdoll.triggerKnockdown(impulse, force);
+      this.ragdoll.triggerKnockdown(impulse, force, duration);
     }
   }
 

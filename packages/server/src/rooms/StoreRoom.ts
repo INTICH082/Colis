@@ -34,7 +34,7 @@ export class StoreRoom {
   private players: Map<string, { state: PlayerState; ws: WebSocket }> = new Map();
   private shelves: Map<string, ShelfState> = new Map();
   private boxes: Map<string, BoxState> = new Map();
-  private flyingBoxes: Map<string, { vx: number; vy: number; vz: number }> = new Map();
+  private flyingBoxes: Map<string, { vx: number; vy: number; vz: number; throwerId?: string; flightTime?: number }> = new Map();
   private storeMoney: number = 1500;
   private storeLevel: number = 1;
 
@@ -189,6 +189,8 @@ export class StoreRoom {
           continue;
         }
 
+        flight.flightTime = (flight.flightTime || 0) + dt;
+
         flight.vy -= 16.0 * dt; // gravity
         flight.vx *= Math.pow(0.96, dt * 25); // air drag
         flight.vz *= Math.pow(0.96, dt * 25);
@@ -196,6 +198,52 @@ export class StoreRoom {
         box.position.x += flight.vx * dt;
         box.position.y += flight.vy * dt;
         box.position.z += flight.vz * dt;
+
+        // Check collision with players in store (if box is moving at sufficient speed)
+        const speed = Math.hypot(flight.vx, flight.vy, flight.vz);
+        if (speed > 1.2) {
+          for (const [targetPlayerId, p] of this.players.entries()) {
+            // Ignore thrower during initial release (< 0.25s)
+            if (targetPlayerId === flight.throwerId && (flight.flightTime || 0) < 0.25) continue;
+
+            const dx = box.position.x - p.state.position.x;
+            const dz = box.position.z - p.state.position.z;
+            const dy = box.position.y - (p.state.position.y + 0.85);
+            const horizDist = Math.hypot(dx, dz);
+
+            if (horizDist < 0.85 && Math.abs(dy) < 0.95) {
+              // Direct hit! Knock down and stun player for 3 seconds
+              const hitDirX = flight.vx / (speed || 1);
+              const hitDirZ = flight.vz / (speed || 1);
+
+              this.broadcast({
+                op: ServerOpCode.PLAYER_TACKLED,
+                data: {
+                  attackerId: flight.throwerId || 'box',
+                  victimId: targetPlayerId,
+                  impulseX: hitDirX,
+                  impulseZ: hitDirZ,
+                  force: Math.min(2.0, speed / 3.0),
+                  duration: 3.0,
+                },
+              });
+
+              this.broadcast({
+                op: ServerOpCode.NOTIFICATION,
+                data: {
+                  type: 'warning',
+                  message: `💥 В игрока ${p.state.name} попала коробка! Оглушен на 3 сек!`,
+                },
+              });
+
+              // Deflect box with bounce impulse
+              flight.vx = -flight.vx * 0.35;
+              flight.vz = -flight.vz * 0.35;
+              flight.vy = 2.0;
+              break;
+            }
+          }
+        }
 
         // Store boundary collisions (walls)
         if (box.position.x < -halfW) {
@@ -509,7 +557,7 @@ export class StoreRoom {
       vy = Math.max(-maxSpd, Math.min(maxSpd, vy));
       vz = Math.max(-maxSpd, Math.min(maxSpd, vz));
 
-      this.flyingBoxes.set(box.id, { vx, vy, vz });
+      this.flyingBoxes.set(box.id, { vx, vy, vz, throwerId: playerId, flightTime: 0 });
 
       this.broadcast({
         op: ServerOpCode.BOX_STATE_CHANGED,

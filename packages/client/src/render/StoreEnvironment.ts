@@ -32,28 +32,41 @@ export class StoreEnvironment {
     diffuseMap.wrapT = THREE.RepeatWrapping;
     diffuseMap.repeat.set(repeatX, repeatY);
     diffuseMap.colorSpace = THREE.SRGBColorSpace;
+    diffuseMap.generateMipmaps = true;
+    diffuseMap.minFilter = THREE.LinearMipmapLinearFilter;
+    diffuseMap.magFilter = THREE.LinearFilter;
+    diffuseMap.anisotropy = 8;
 
     const normalMap = textureLoader.load('/textures/floor/floor_normal.jpg');
     normalMap.wrapS = THREE.RepeatWrapping;
     normalMap.wrapT = THREE.RepeatWrapping;
     normalMap.repeat.set(repeatX, repeatY);
+    normalMap.generateMipmaps = true;
+    normalMap.minFilter = THREE.LinearMipmapLinearFilter;
+    normalMap.magFilter = THREE.LinearFilter;
+    normalMap.anisotropy = 8;
 
     const roughnessMap = textureLoader.load('/textures/floor/floor_roughness.png');
     roughnessMap.wrapS = THREE.RepeatWrapping;
     roughnessMap.wrapT = THREE.RepeatWrapping;
     roughnessMap.repeat.set(repeatX, repeatY);
+    roughnessMap.generateMipmaps = true;
+    roughnessMap.minFilter = THREE.LinearMipmapLinearFilter;
+    roughnessMap.magFilter = THREE.LinearFilter;
+    roughnessMap.anisotropy = 8;
 
     const floorMat = new THREE.MeshStandardMaterial({
       map: diffuseMap,
       normalMap: normalMap,
-      normalScale: new THREE.Vector2(0.85, 0.85),
+      normalScale: new THREE.Vector2(0.35, 0.35),
       roughnessMap: roughnessMap,
-      roughness: 0.38,
-      metalness: 0.04,
+      roughness: 0.42,
+      metalness: 0.03,
     });
 
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.receiveShadow = true;
+    floor.position.y = 0.001; // Slightly above foundation to prevent Z-fighting
     floor.name = 'floor';
     this.scene.add(floor);
 
@@ -71,7 +84,7 @@ export class StoreEnvironment {
     const zoneMesh = new THREE.Mesh(zoneGeo, zoneMat);
     zoneMesh.position.set(
       (STORE_LAYOUT.DELIVERY_ZONE.minX + STORE_LAYOUT.DELIVERY_ZONE.maxX) / 2,
-      0.01,
+      0.015,
       (STORE_LAYOUT.DELIVERY_ZONE.minZ + STORE_LAYOUT.DELIVERY_ZONE.maxZ) / 2
     );
     this.scene.add(zoneMesh);
@@ -88,47 +101,80 @@ export class StoreEnvironment {
     this.buildWalls();
   }
 
+  public wallMeshes: THREE.Mesh[] = [];
+  private occlusionRaycaster = new THREE.Raycaster();
 
-  private buildWalls(): void {
-    const wallMat = new THREE.MeshStandardMaterial({
+  private createWallMaterial(): THREE.MeshStandardMaterial {
+    return new THREE.MeshStandardMaterial({
       color: 0x334155,
       roughness: 0.8,
+      transparent: true,
+      opacity: 1.0,
     });
-    const baseboardMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      roughness: 0.5,
-    });
+  }
 
+  private buildWalls(): void {
     const w = STORE_LAYOUT.FLOOR_WIDTH;
     const d = STORE_LAYOUT.FLOOR_DEPTH;
     const h = STORE_LAYOUT.WALL_HEIGHT;
 
     // Back wall (-Z)
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.4), wallMat);
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.4), this.createWallMaterial());
     backWall.position.set(0, h / 2, -d / 2 - 0.2);
     backWall.receiveShadow = true;
     this.scene.add(backWall);
+    this.wallMeshes.push(backWall);
 
     // Left wall (-X)
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), wallMat);
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
     leftWall.position.set(-w / 2 - 0.2, h / 2, 0);
     leftWall.receiveShadow = true;
     this.scene.add(leftWall);
+    this.wallMeshes.push(leftWall);
 
     // Right wall (+X)
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), wallMat);
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
     rightWall.position.set(w / 2 + 0.2, h / 2, 0);
     rightWall.receiveShadow = true;
     this.scene.add(rightWall);
+    this.wallMeshes.push(rightWall);
 
     // Front Wall (+Z) with wide entrance glass/opening
-    const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), wallMat);
+    const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
     frontWallLeft.position.set(-w / 4 - 2, h / 2, d / 2 + 0.2);
+    frontWallLeft.receiveShadow = true;
     this.scene.add(frontWallLeft);
+    this.wallMeshes.push(frontWallLeft);
 
-    const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), wallMat);
+    const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
     frontWallRight.position.set(w / 4 + 2, h / 2, d / 2 + 0.2);
+    frontWallRight.receiveShadow = true;
     this.scene.add(frontWallRight);
+    this.wallMeshes.push(frontWallRight);
+  }
+
+  /**
+   * Smoothly fades walls that occlude the player from the camera's point of view
+   */
+  public updateWallOcclusion(cameraPos: THREE.Vector3, playerPos: THREE.Vector3, dt: number): void {
+    const target = new THREE.Vector3(playerPos.x, playerPos.y + 0.9, playerPos.z);
+    const dir = new THREE.Vector3().subVectors(target, cameraPos);
+    const distToPlayer = dir.length();
+    dir.normalize();
+
+    this.occlusionRaycaster.set(cameraPos, dir);
+    this.occlusionRaycaster.near = 0.5;
+    this.occlusionRaycaster.far = Math.max(0.5, distToPlayer - 0.3);
+
+    const hits = this.occlusionRaycaster.intersectObjects(this.wallMeshes, false);
+    const occludingSet = new Set(hits.map((h) => h.object));
+
+    for (const wall of this.wallMeshes) {
+      const mat = wall.material as THREE.MeshStandardMaterial;
+      const targetOpacity = occludingSet.has(wall) ? 0.22 : 1.0;
+      mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, Math.min(1.0, 10.0 * dt));
+      mat.depthWrite = mat.opacity > 0.85;
+    }
   }
 
 

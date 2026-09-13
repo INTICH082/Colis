@@ -245,9 +245,9 @@ export class ActiveRagdollController {
   /**
    * Triggers a hilarious TABS ragdoll knockdown (e.g. tackled by another sprinting player or hard impact)
    */
-  public triggerKnockdown(impulseDir: THREE.Vector3, force: number = 1.0): void {
+  public triggerKnockdown(impulseDir: THREE.Vector3, force: number = 1.0, duration: number = 3.0): void {
     this.status = 'KNOCKED_DOWN';
-    this.knockdownTimer = 1.4; // Lie and slide on floor
+    this.knockdownTimer = duration; // Lie and slide on floor (stun period)
     this.getUpTimer = 0;
 
     // Slide across floor with physical momentum

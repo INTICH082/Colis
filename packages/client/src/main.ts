@@ -56,6 +56,11 @@ class ColisGame {
   private verticalVelocity: number = 0;
   private isGrounded: boolean = true;
 
+  // Sprint Stamina (5 seconds sprint, 2 seconds rest before gradual recovery)
+  private readonly MAX_STAMINA: number = 5.0;
+  private currentStamina: number = 5.0;
+  private timeSinceSprint: number = 2.0;
+
   // Throw charge state
   private isChargingThrow: boolean = false;
   private throwChargeStartTime: number = 0;
@@ -67,7 +72,7 @@ class ColisGame {
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.renderer = new GameRenderer(this.canvas);
-    this.atmosphere = new AtmosphereManager(this.renderer.scene, this.renderer.dirLight);
+    this.atmosphere = new AtmosphereManager(this.renderer.scene, this.renderer.dirLight, this.renderer.ambientLight);
     this.environment = new StoreEnvironment(this.renderer.scene);
     this.shelfManager = new InstancedShelfManager(this.renderer.scene);
     this.boxManager = new BoxEntityManager(this.renderer.scene);
@@ -90,11 +95,14 @@ class ColisGame {
       onPlayerTackled: (data) => {
         const isLocalVictim = data.victimId === this.localPlayerId;
         const victim = isLocalVictim ? this.localPlayerEntity : this.remotePlayers.get(data.victimId);
+        const duration = data.duration || 3.0;
         if (victim) {
-          victim.knockdown(new THREE.Vector3(data.impulseX, 0, data.impulseZ), data.force || 1.0);
+          victim.knockdown(new THREE.Vector3(data.impulseX, 0, data.impulseZ), data.force || 1.0, duration);
           this.ui.showNotification({
             type: 'warning',
-            message: isLocalVictim ? 'Тебя сбили с ног в рэгдолл!' : 'Игрока сбили с ног!',
+            message: isLocalVictim
+              ? (data.attackerId === 'box' || !data.attackerId ? '😵 В тебя попала коробка! Оглушен на 3 сек!' : 'Тебя сбили с ног в рэгдолл!')
+              : (data.attackerId === 'box' ? 'Игрока оглушило прилетевшей коробкой!' : 'Игрока сбили с ног!'),
           });
         }
       },
@@ -463,9 +471,10 @@ class ColisGame {
     this.updateRaycasting();
     this.updateInterpolations(dt);
 
-    // Camera follow
+    // Camera follow & Wall Occlusion Fading
     if (this.localPlayerEntity) {
       this.renderer.updateCamera(this.localPlayerEntity.group.position, dt);
+      this.environment.updateWallOcclusion(this.renderer.camera.position, this.localPlayerEntity.group.position, dt);
     }
 
     // Update sky dome and ocean waves
@@ -511,13 +520,30 @@ class ColisGame {
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) inputX -= 1;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) inputX += 1;
 
-    const isSprinting = !!this.keys['ShiftLeft'] || !!this.keys['ShiftRight'];
+    const shiftPressed = !!this.keys['ShiftLeft'] || !!this.keys['ShiftRight'];
 
     // Convert screen WASD into isometric camera-relative world direction
     const worldDir = cameraToWorldInput(inputX, inputZ);
+    const isMoving = Math.hypot(worldDir.x, worldDir.z) > 0.05;
+
+    // Sprint Stamina: 5 seconds max sprint, 2 seconds delay before gradual recovery
+    let isSprinting = false;
+    if (shiftPressed && isMoving && this.currentStamina > 0.05) {
+      isSprinting = true;
+      this.currentStamina = Math.max(0, this.currentStamina - dt);
+      this.timeSinceSprint = 0;
+    } else {
+      isSprinting = false;
+      this.timeSinceSprint += dt;
+      if (this.timeSinceSprint >= 2.0) {
+        // Recovers to full over ~3.5s after 2s cooldown
+        this.currentStamina = Math.min(this.MAX_STAMINA, this.currentStamina + dt * (this.MAX_STAMINA / 3.5));
+      }
+    }
+
+    this.ui.setStamina(this.currentStamina / this.MAX_STAMINA);
 
     const speed = isSprinting ? 7.0 : 4.5;
-    const isMoving = Math.hypot(worldDir.x, worldDir.z) > 0.05;
 
     // Vertical jump and gravity physics simulation
     const wasGrounded = this.physics.isGrounded();
@@ -585,8 +611,8 @@ class ColisGame {
         if (distToOther < 0.95) {
           this.lastTackleTime = nowSec;
           const tackleImpulse = new THREE.Vector3(worldDir.x, 0, worldDir.z).normalize();
-          remotePlayer.knockdown(tackleImpulse, 1.4);
-          this.network.sendPlayerTackle(remoteId, tackleImpulse.x, tackleImpulse.z, 1.4);
+          remotePlayer.knockdown(tackleImpulse, 1.4, 3.0);
+          this.network.sendPlayerTackle(remoteId, tackleImpulse.x, tackleImpulse.z, 1.4, 3.0);
 
           // Local player impact recoil
           if (this.localPlayerEntity?.ragdoll) {

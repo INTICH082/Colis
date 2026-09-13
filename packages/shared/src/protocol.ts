@@ -80,6 +80,7 @@ export interface PlayerTacklePayload {
   impulseX: number;
   impulseZ: number;
   force?: number;
+  duration?: number;
 }
 
 export type ClientMessage =

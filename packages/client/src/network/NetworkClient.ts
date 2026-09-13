@@ -149,7 +149,7 @@ export class NetworkClient {
     }
   }
 
-  public sendPlayerTackle(victimId: string, impulseX: number, impulseZ: number, force: number = 1.0): void {
+  public sendPlayerTackle(victimId: string, impulseX: number, impulseZ: number, force: number = 1.0, duration: number = 3.0): void {
     this.send({
       op: ClientOpCode.PLAYER_TACKLE,
       data: {
@@ -158,6 +158,7 @@ export class NetworkClient {
         impulseX,
         impulseZ,
         force,
+        duration,
       },
     });
   }

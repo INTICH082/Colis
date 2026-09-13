@@ -5,6 +5,7 @@ export class GameRenderer {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public dirLight: THREE.DirectionalLight;
+  public ambientLight: THREE.AmbientLight;
   public raycaster: THREE.Raycaster;
   public mousePos: THREE.Vector2;
 
@@ -45,8 +46,8 @@ export class GameRenderer {
     this.renderer.toneMappingExposure = 1.1;
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    this.scene.add(this.ambientLight);
 
     this.dirLight = new THREE.DirectionalLight(0xfffaed, 1.35);
     this.dirLight.position.set(15, 25, 12);
@@ -54,8 +55,9 @@ export class GameRenderer {
     this.dirLight.shadow.mapSize.width = 2048;
     this.dirLight.shadow.mapSize.height = 2048;
     this.dirLight.shadow.camera.near = 0.5;
-    this.dirLight.shadow.camera.far = 60;
-    this.dirLight.shadow.bias = -0.0005;
+    this.dirLight.shadow.camera.far = 65;
+    this.dirLight.shadow.bias = -0.00005;
+    this.dirLight.shadow.normalBias = 0.025;
 
     const shadowDist = 18;
     this.dirLight.shadow.camera.left = -shadowDist;
@@ -106,12 +108,7 @@ export class GameRenderer {
     this.currentCameraTarget.lerp(targetPos, Math.min(1, 10 * dt));
     this.updateCameraTransform(this.currentCameraTarget);
 
-    // Keep sun shadow frustum centered near the player
-    this.dirLight.position.set(
-      this.currentCameraTarget.x + 15,
-      25,
-      this.currentCameraTarget.z + 12
-    );
+    // Keep sun shadow frustum target centered near the player
     this.dirLight.target.position.copy(this.currentCameraTarget);
     this.dirLight.target.updateMatrixWorld();
   }

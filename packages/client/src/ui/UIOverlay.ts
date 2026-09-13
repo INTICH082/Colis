@@ -17,6 +17,9 @@ export class UIOverlay {
   private elThrowCard: HTMLElement;
   private elThrowPct: HTMLElement;
   private elThrowFill: HTMLElement;
+  private elStaminaCard: HTMLElement;
+  private elStaminaPct: HTMLElement;
+  private elStaminaFill: HTMLElement;
 
   private onOrderCallback?: (productId: string, quantity: number) => void;
   private onChangeRoomCallback?: (roomId: string) => void;
@@ -38,6 +41,9 @@ export class UIOverlay {
     this.elThrowCard = document.getElementById('throw-charge-card')!;
     this.elThrowPct = document.getElementById('throw-charge-pct')!;
     this.elThrowFill = document.getElementById('throw-charge-fill')!;
+    this.elStaminaCard = document.getElementById('stamina-card')!;
+    this.elStaminaPct = document.getElementById('stamina-pct')!;
+    this.elStaminaFill = document.getElementById('stamina-fill')!;
 
     this.setupEventListeners();
     this.renderDeliveryProducts();
@@ -177,5 +183,23 @@ export class UIOverlay {
     const percent = Math.round(Math.max(0, Math.min(1, chargeRatio)) * 100);
     this.elThrowPct.textContent = `${percent}%`;
     this.elThrowFill.style.width = `${percent}%`;
+  }
+
+  public setStamina(ratio: number): void {
+    if (ratio >= 0.999) {
+      this.elStaminaCard.style.display = 'none';
+      return;
+    }
+
+    this.elStaminaCard.style.display = 'flex';
+    const percent = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+    this.elStaminaPct.textContent = `${percent}%`;
+    this.elStaminaFill.style.width = `${percent}%`;
+
+    if (percent <= 15) {
+      this.elStaminaFill.classList.add('depleted');
+    } else {
+      this.elStaminaFill.classList.remove('depleted');
+    }
   }
 }
