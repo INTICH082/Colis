@@ -461,7 +461,13 @@ export class StoreRoom {
 
     p.position.x = Math.max(-halfW, Math.min(halfW, input.position.x));
     p.position.y = Math.max(0, input.position.y);
-    p.position.z = Math.max(-halfD, Math.min(halfD, input.position.z));
+    // Front walls block Z > halfD, but entrance doorway (|X| <= 3.8) allows walking out onto dock terrace
+    p.position.z = Math.max(-halfD, input.position.z);
+    if (Math.abs(p.position.x) > 3.8) {
+      p.position.z = Math.min(halfD, p.position.z);
+    } else {
+      p.position.z = Math.min(13.8, p.position.z);
+    }
   }
 
   private handlePickupBox(playerId: string, data: InteractBoxPickupPayload): void {
@@ -490,7 +496,12 @@ export class StoreRoom {
       const halfD = STORE_LAYOUT.FLOOR_DEPTH / 2 - 0.4;
       entry.state.position.x = Math.max(-halfW, Math.min(halfW, data.playerPosition.x));
       entry.state.position.y = Math.max(0, data.playerPosition.y);
-      entry.state.position.z = Math.max(-halfD, Math.min(halfD, data.playerPosition.z));
+      entry.state.position.z = Math.max(-halfD, data.playerPosition.z);
+      if (Math.abs(entry.state.position.x) > 3.8) {
+        entry.state.position.z = Math.min(halfD, entry.state.position.z);
+      } else {
+        entry.state.position.z = Math.min(13.8, entry.state.position.z);
+      }
     }
 
     const dist = distanceXZ(entry.state.position, box.position);

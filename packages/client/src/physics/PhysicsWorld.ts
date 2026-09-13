@@ -56,13 +56,35 @@ export class PhysicsWorld {
     this.world.createCollider(
       RAPIER.ColliderDesc.cuboid(w / 2, h / 2, 0.3).setTranslation(0, h / 2, -d / 2 - 0.15)
     );
-    // Left wall
+    // Left wall (-X)
     this.world.createCollider(
       RAPIER.ColliderDesc.cuboid(0.3, h / 2, d / 2).setTranslation(-w / 2 - 0.15, h / 2, 0)
     );
-    // Right wall
+    // Right wall (+X)
     this.world.createCollider(
       RAPIER.ColliderDesc.cuboid(0.3, h / 2, d / 2).setTranslation(w / 2 + 0.15, h / 2, 0)
+    );
+
+    // Front wall Left (-X side of entrance, covers X in [-12, -4])
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid((w - 8) / 4, h / 2, 0.25)
+        .setTranslation(-w / 4 - 2, h / 2, d / 2 + 0.2)
+    );
+    // Front wall Right (+X side of entrance, covers X in [4, 12])
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid((w - 8) / 4, h / 2, 0.25)
+        .setTranslation(w / 4 + 2, h / 2, d / 2 + 0.2)
+    );
+
+    // Front dock terrace boundary (keeps player safe on dock)
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(7.5, 1.0, 0.25).setTranslation(0, 0.5, 14.3)
+    );
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.25, 1.0, 2.2).setTranslation(-7.0, 0.5, 12.2)
+    );
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.25, 1.0, 2.2).setTranslation(7.0, 0.5, 12.2)
     );
   }
 

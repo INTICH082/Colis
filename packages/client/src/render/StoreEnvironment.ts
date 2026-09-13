@@ -110,6 +110,7 @@ export class StoreEnvironment {
       roughness: 0.8,
       transparent: true,
       opacity: 1.0,
+      depthWrite: true,
     });
   }
 
@@ -123,14 +124,12 @@ export class StoreEnvironment {
     backWall.position.set(0, h / 2, -d / 2 - 0.2);
     backWall.receiveShadow = true;
     this.scene.add(backWall);
-    this.wallMeshes.push(backWall);
 
     // Left wall (-X)
     const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
     leftWall.position.set(-w / 2 - 0.2, h / 2, 0);
     leftWall.receiveShadow = true;
     this.scene.add(leftWall);
-    this.wallMeshes.push(leftWall);
 
     // Right wall (+X)
     const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
@@ -164,16 +163,23 @@ export class StoreEnvironment {
 
     this.occlusionRaycaster.set(cameraPos, dir);
     this.occlusionRaycaster.near = 0.5;
-    this.occlusionRaycaster.far = Math.max(0.5, distToPlayer - 0.3);
+    this.occlusionRaycaster.far = Math.max(0.5, distToPlayer - 0.2);
 
     const hits = this.occlusionRaycaster.intersectObjects(this.wallMeshes, false);
-    const occludingSet = new Set(hits.map((h) => h.object));
+    const occludingSet = new Set<THREE.Object3D>();
+
+    for (const hit of hits) {
+      // Only fade if the player is within 4.5m of the occluding wall
+      if (hit.point.distanceTo(target) < 4.5) {
+        occludingSet.add(hit.object);
+      }
+    }
 
     for (const wall of this.wallMeshes) {
       const mat = wall.material as THREE.MeshStandardMaterial;
-      const targetOpacity = occludingSet.has(wall) ? 0.22 : 1.0;
-      mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, Math.min(1.0, 10.0 * dt));
-      mat.depthWrite = mat.opacity > 0.85;
+      // "слегка пропадала": slightly fade to 0.55 opacity, maintaining visibility and solid appearance
+      const targetOpacity = occludingSet.has(wall) ? 0.55 : 1.0;
+      mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, Math.min(1.0, 8.0 * dt));
     }
   }
 
