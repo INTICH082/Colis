@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PlayerState } from '@colis/shared';
+import { ActiveRagdollController, CharacterBones } from './ActiveRagdollController';
 
 interface LoadedCharacterAssets {
   scene: THREE.Group;
@@ -14,6 +15,8 @@ export class PlayerEntity {
 
   public id: string;
   public group: THREE.Group;
+  public useRagdoll: boolean = true;
+  public ragdoll: ActiveRagdollController | null = null;
   private modelRoot: THREE.Group | null = null;
   private mixer: THREE.AnimationMixer | null = null;
   private actions: Map<string, THREE.AnimationAction> = new Map();
@@ -117,11 +120,27 @@ export class PlayerEntity {
     // Clone skinned mesh and skeleton safely
     this.modelRoot = SkeletonUtils.clone(assets.scene) as THREE.Group;
     this.modelRoot.position.set(0, 0, 0);
-    // Base orientation (0): Root bone in new model is already oriented correctly
+    // Base orientation (0): Root bone in model is already oriented correctly
     this.modelRoot.rotation.y = 0;
     this.group.add(this.modelRoot);
 
-    // Setup animation mixer
+    // Discover skeleton bones for Active Ragdoll
+    const bones: CharacterBones = {};
+    this.modelRoot.traverse((child) => {
+      const isObjOrBone = (child as THREE.Bone).isBone || child.type === 'Bone' || child.type === 'Object3D';
+      if (child.name === 'Torso') bones.torso = child;
+      else if (child.name === 'Head') bones.head = child;
+      else if (child.name === 'R_Leg') bones.rLeg = child;
+      else if (child.name === 'L_Leg') bones.lLeg = child;
+      else if (child.name === 'R_Hand') bones.rHand = child;
+      else if (child.name === 'L_Hand') bones.lHand = child;
+      else if (child.name === 'Root' && isObjOrBone && !(child as THREE.Mesh).isMesh) bones.root = child;
+    });
+
+    this.ragdoll = new ActiveRagdollController(bones);
+    console.log(`[PlayerEntity] ActiveRagdoll initialized for player ${this.id} with bones:`, Object.keys(bones));
+
+    // Setup animation mixer as fallback or for manual toggle
     this.mixer = new THREE.AnimationMixer(this.modelRoot);
     assets.animations.forEach((clip) => {
       const action = this.mixer!.clipAction(clip);
@@ -134,11 +153,13 @@ export class PlayerEntity {
       this.actions.set(clip.name, action);
     });
 
-    // Start with idle
-    const idleAction = this.actions.get('idle');
-    if (idleAction) {
-      idleAction.play();
-      this.currentActionName = 'idle';
+    // Start with idle only if not using active ragdoll
+    if (!this.useRagdoll) {
+      const idleAction = this.actions.get('idle');
+      if (idleAction) {
+        idleAction.play();
+        this.currentActionName = 'idle';
+      }
     }
   }
 
@@ -298,6 +319,32 @@ export class PlayerEntity {
     moveX: number = 0,
     moveZ: number = 0
   ): void {
+    if (this.useRagdoll && this.ragdoll) {
+      // 1. Procedural Active Ragdoll Physics (TABS style)
+      this.ragdoll.update({
+        dt,
+        isMoving,
+        isSprinting,
+        isAirborne,
+        worldMoveX: moveX,
+        worldMoveZ: moveZ,
+        playerRotationY: this.group.rotation.y,
+        isHoldingBox: this.heldBoxMesh.visible,
+      });
+
+      // 2. Dynamic Held Box Inertia & Sway
+      if (this.heldBoxMesh.visible) {
+        this.heldBoxMesh.position.set(0, 0.75 + this.ragdoll.boxOffsetY.value, -0.45);
+        this.heldBoxMesh.rotation.set(
+          this.ragdoll.boxOffsetPitch.value,
+          this.ragdoll.boxOffsetYaw.value,
+          this.ragdoll.boxOffsetRoll.value
+        );
+      }
+      return;
+    }
+
+    // Fallback: Baked animation mixer
     if (this.mixer) {
       this.mixer.update(dt);
     }
