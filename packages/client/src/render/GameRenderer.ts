@@ -11,7 +11,7 @@ export class GameRenderer {
 
   // Isometric camera offsets & gentle zoom controls
   private cameraOffset = new THREE.Vector3(10, 13, 10);
-  private currentCameraTarget = new THREE.Vector3(0, 0, 7);
+  public currentCameraTarget = new THREE.Vector3(0, 0, 7);
   private zoomFactor: number = 1.0;
   private targetZoomFactor: number = 1.0;
   private readonly minZoom: number = 0.75;
@@ -54,17 +54,18 @@ export class GameRenderer {
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.width = 2048;
     this.dirLight.shadow.mapSize.height = 2048;
-    this.dirLight.shadow.camera.near = 0.5;
-    this.dirLight.shadow.camera.far = 65;
-    this.dirLight.shadow.bias = -0.00005;
-    this.dirLight.shadow.normalBias = 0.025;
+    this.dirLight.shadow.camera.near = 1.0;
+    this.dirLight.shadow.camera.far = 130;
+    this.dirLight.shadow.bias = -0.0001;
+    this.dirLight.shadow.normalBias = 0.03;
 
-    const shadowDist = 18;
+    const shadowDist = 34;
     this.dirLight.shadow.camera.left = -shadowDist;
     this.dirLight.shadow.camera.right = shadowDist;
     this.dirLight.shadow.camera.top = shadowDist;
     this.dirLight.shadow.camera.bottom = -shadowDist;
     this.scene.add(this.dirLight);
+    this.scene.add(this.dirLight.target);
 
     // Raycaster & Mouse tracking
     this.raycaster = new THREE.Raycaster();
@@ -108,8 +109,8 @@ export class GameRenderer {
     this.currentCameraTarget.lerp(targetPos, Math.min(1, 10 * dt));
     this.updateCameraTransform(this.currentCameraTarget);
 
-    // Keep sun shadow frustum target centered near the player
-    this.dirLight.target.position.copy(this.currentCameraTarget);
+    // Keep sun shadow frustum target centered near the player on the ground plane
+    this.dirLight.target.position.set(this.currentCameraTarget.x, 0, this.currentCameraTarget.z);
     this.dirLight.target.updateMatrixWorld();
   }
 

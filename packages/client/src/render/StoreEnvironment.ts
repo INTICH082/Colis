@@ -103,15 +103,223 @@ export class StoreEnvironment {
 
   public wallMeshes: THREE.Mesh[] = [];
   private occlusionRaycaster = new THREE.Raycaster();
+  private baseWallMaterial: THREE.MeshStandardMaterial | null = null;
 
+  /**
+   * Generates a box geometry with UV coordinates scaled proportionally to world units (meters),
+   * preventing stretching and maintaining consistent texture resolution across walls of any size.
+   */
+  private createWallGeometry(width: number, height: number, depth: number, tileSize: number = 2.5): THREE.BoxGeometry {
+    const geo = new THREE.BoxGeometry(width, height, depth);
+    const uvs = geo.attributes.uv;
+    const faceSizes = [
+      [depth, height], // +X (right)
+      [depth, height], // -X (left)
+      [width, depth],  // +Y (top)
+      [width, depth],  // -Y (bottom)
+      [width, height], // +Z (front)
+      [width, height], // -Z (back)
+    ];
+
+    for (let i = 0; i < 6; i++) {
+      const [faceW, faceH] = faceSizes[i];
+      const uRepeat = faceW / tileSize;
+      const vRepeat = faceH / tileSize;
+      const offset = i * 4;
+      for (let v = 0; v < 4; v++) {
+        const idx = offset + v;
+        uvs.setXY(idx, uvs.getX(idx) * uRepeat, uvs.getY(idx) * vRepeat);
+      }
+    }
+    uvs.needsUpdate = true;
+    return geo;
+  }
+
+  /**
+   * Creates a PBR wall material with:
+   * 1. Color map (Albedo / Diffuse)
+   * 2. Normal map
+   * 3. Reflection / Roughness map
+   */
   private createWallMaterial(): THREE.MeshStandardMaterial {
-    return new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.8,
-      transparent: true,
-      opacity: 1.0,
-      depthWrite: true,
-    });
+    if (!this.baseWallMaterial) {
+      const textureLoader = new THREE.TextureLoader();
+
+      // 1. Карта цвета (Albedo / Diffuse)
+      const diffuseMap = textureLoader.load('/textures/walls/wall_diffuse.jpg');
+      diffuseMap.wrapS = THREE.RepeatWrapping;
+      diffuseMap.wrapT = THREE.RepeatWrapping;
+      diffuseMap.colorSpace = THREE.SRGBColorSpace;
+      diffuseMap.generateMipmaps = true;
+      diffuseMap.minFilter = THREE.LinearMipmapLinearFilter;
+      diffuseMap.magFilter = THREE.LinearFilter;
+      diffuseMap.anisotropy = 8;
+
+      // 2. Карта нормалей (Normal map)
+      const normalMap = textureLoader.load('/textures/walls/wall_normal.jpg');
+      normalMap.wrapS = THREE.RepeatWrapping;
+      normalMap.wrapT = THREE.RepeatWrapping;
+      normalMap.generateMipmaps = true;
+      normalMap.minFilter = THREE.LinearMipmapLinearFilter;
+      normalMap.magFilter = THREE.LinearFilter;
+      normalMap.anisotropy = 8;
+
+      // 3. Карта отражений / шероховатости (Roughness / Specular reflection map)
+      const roughnessMap = textureLoader.load('/textures/walls/wall_roughness.jpg');
+      roughnessMap.wrapS = THREE.RepeatWrapping;
+      roughnessMap.wrapT = THREE.RepeatWrapping;
+      roughnessMap.generateMipmaps = true;
+      roughnessMap.minFilter = THREE.LinearMipmapLinearFilter;
+      roughnessMap.magFilter = THREE.LinearFilter;
+      roughnessMap.anisotropy = 8;
+
+      this.baseWallMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0xb8b2aa), // Приглушённый оттенок (чуть темнее на ~25-30%)
+        map: diffuseMap,
+        normalMap: normalMap,
+        normalScale: new THREE.Vector2(0.85, 0.85),
+        roughnessMap: roughnessMap,
+        roughness: 0.88,
+        metalness: 0.03,
+        transparent: true,
+        opacity: 1.0,
+        depthWrite: true,
+      });
+
+      // Shader injection: рандомизация отражений по тайлам, стохастическое устранение повторов и органика
+      this.baseWallMaterial.customProgramCacheKey = () => 'wall_stochastic_pbr_v1';
+      this.baseWallMaterial.onBeforeCompile = (shader) => {
+        // Передаём мировые координаты вершин в пиксельный шейдер
+        shader.vertexShader = `
+          varying vec3 vWallWorldPos;
+        ` + shader.vertexShader;
+
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <project_vertex>',
+          `
+          vWallWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          #include <project_vertex>
+          `
+        );
+
+        // Математические функции шума и хеширования
+        shader.fragmentShader = `
+          varying vec3 vWallWorldPos;
+
+          // 2D Hash
+          float wallHash21(vec2 p) {
+            p = fract(p * vec2(123.34, 456.21));
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+          }
+
+          // Smooth 2D Value Noise (квинтовая интерполяция для плавных переходов между ячейками тайлов)
+          float wallValueNoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+            float a = wallHash21(i);
+            float b = wallHash21(i + vec2(1.0, 0.0));
+            float c = wallHash21(i + vec2(0.0, 1.0));
+            float d = wallHash21(i + vec2(1.0, 1.0));
+
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }
+
+          // Multi-octave FBM для крупных органических зон на стене
+          float wallFBM(vec2 p) {
+            float v = 0.0;
+            float a = 0.5;
+            mat2 rot = mat2(0.877, 0.479, -0.479, 0.877);
+            for (int i = 0; i < 3; ++i) {
+              v += a * wallValueNoise(p);
+              p = rot * p * 2.02 + vec2(17.3, 31.7);
+              a *= 0.5;
+            }
+            return v;
+          }
+        ` + shader.fragmentShader;
+
+        // 1. Модификация карты отражений / шероховатости (Roughness)
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <roughnessmap_fragment>',
+          `
+          float roughnessFactor = roughness;
+
+          #ifdef USE_ROUGHNESSMAP
+            // Базовая выборка из карты отражений
+            vec4 texelRoughness1 = texture2D(roughnessMap, vRoughnessMapUv);
+
+            // Вторая десинхронизированная выборка по мировым координатам, разбивающая паттерн повторения
+            vec2 jitterUv = vRoughnessMapUv * 1.37 + vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.18 + vec2(3.14, 1.59);
+            vec4 texelRoughness2 = texture2D(roughnessMap, jitterUv);
+
+            // Случайный коэффициент отражений для каждого тайла стены (~2.5м)
+            float tileNoise = wallValueNoise(vRoughnessMapUv * 0.95 + vec2(42.1, 13.7));
+            // Макро-неоднородность (пятна влажности, износа, полировки)
+            float macroNoise = wallFBM(vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.35);
+
+            // Стохастическое смешивание выборок карты отражений
+            float blendWeight = smoothstep(0.3, 0.7, macroNoise);
+            float blendedRoughness = mix(texelRoughness1.g, texelRoughness2.g, blendWeight * 0.65);
+
+            // Разброс отражений по тайлам: одни участки более глянцевые с сочными бликами, другие матовые
+            float randomTileRoughness = mix(0.40, 1.30, tileNoise);
+
+            // Глянцевые потёртости и разглаженные мастерком полосы
+            float glossScuffs = smoothstep(0.68, 0.90, macroNoise) * 0.36;
+
+            roughnessFactor = clamp(roughnessFactor * blendedRoughness * randomTileRoughness - glossScuffs, 0.16, 1.0);
+          #endif
+          `
+        );
+
+        // 2. Устранение однообразия цвета (разбивка повторений и лёгкие тональные переходы между тайлами)
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>',
+          `
+          #ifdef USE_MAP
+            vec2 jitterUvMap = vMapUv * 1.37 + vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.18 + vec2(3.14, 1.59);
+            vec4 sampledDiffuseColor1 = texture2D(map, vMapUv);
+            vec4 sampledDiffuseColor2 = texture2D(map, jitterUvMap);
+
+            float macroNoiseMap = wallFBM(vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.35);
+            float blendMap = smoothstep(0.35, 0.65, macroNoiseMap);
+            vec4 sampledDiffuseColor = mix(sampledDiffuseColor1, sampledDiffuseColor2, blendMap * 0.4);
+
+            #ifdef DECODE_VIDEO_TEXTURE
+              sampledDiffuseColor = sRGBTransferEOTF(sampledDiffuseColor);
+            #endif
+
+            // Естественная вариация тона штукатурки между партиями/участками стены
+            float tileTone = wallValueNoise(vMapUv * 0.95 + vec2(17.3, 89.2));
+            sampledDiffuseColor.rgb *= (0.92 + 0.16 * tileTone);
+
+            diffuseColor *= sampledDiffuseColor;
+          #endif
+          `
+        );
+
+        // 3. Органическая неровность нормалей (широкие волны ручной штукатурки стен)
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <normal_fragment_maps>',
+          `
+          #include <normal_fragment_maps>
+          #if defined( USE_NORMALMAP_TANGENTSPACE )
+            vec2 broadWave = vec2(
+              wallValueNoise(vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.9 + vec2(2.4, 5.1)),
+              wallValueNoise(vec2(vWallWorldPos.x + vWallWorldPos.z, vWallWorldPos.y) * 0.9 + vec2(8.7, 1.3))
+            ) * 2.0 - 1.0;
+            normal = normalize(normal + vec3(broadWave * 0.08, 0.0));
+          #endif
+          `
+        );
+      };
+    }
+
+    // Clone to allow independent wall occlusion fading
+    return this.baseWallMaterial.clone();
   }
 
   private buildWalls(): void {
@@ -120,32 +328,32 @@ export class StoreEnvironment {
     const h = STORE_LAYOUT.WALL_HEIGHT;
 
     // Back wall (-Z)
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.4), this.createWallMaterial());
+    const backWall = new THREE.Mesh(this.createWallGeometry(w, h, 0.4), this.createWallMaterial());
     backWall.position.set(0, h / 2, -d / 2 - 0.2);
     backWall.receiveShadow = true;
     this.scene.add(backWall);
 
     // Left wall (-X)
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
+    const leftWall = new THREE.Mesh(this.createWallGeometry(0.4, h, d), this.createWallMaterial());
     leftWall.position.set(-w / 2 - 0.2, h / 2, 0);
     leftWall.receiveShadow = true;
     this.scene.add(leftWall);
 
     // Right wall (+X)
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, h, d), this.createWallMaterial());
+    const rightWall = new THREE.Mesh(this.createWallGeometry(0.4, h, d), this.createWallMaterial());
     rightWall.position.set(w / 2 + 0.2, h / 2, 0);
     rightWall.receiveShadow = true;
     this.scene.add(rightWall);
     this.wallMeshes.push(rightWall);
 
     // Front Wall (+Z) with wide entrance glass/opening
-    const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
+    const frontWallLeft = new THREE.Mesh(this.createWallGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
     frontWallLeft.position.set(-w / 4 - 2, h / 2, d / 2 + 0.2);
     frontWallLeft.receiveShadow = true;
     this.scene.add(frontWallLeft);
     this.wallMeshes.push(frontWallLeft);
 
-    const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
+    const frontWallRight = new THREE.Mesh(this.createWallGeometry((w - 8) / 2, h, 0.4), this.createWallMaterial());
     frontWallRight.position.set(w / 4 + 2, h / 2, d / 2 + 0.2);
     frontWallRight.receiveShadow = true;
     this.scene.add(frontWallRight);

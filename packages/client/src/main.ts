@@ -145,7 +145,27 @@ class ColisGame {
 
   private setupInputs(): void {
     window.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
       this.keys[e.code] = true;
+
+      // Debug: Smooth time-of-day transitions (1 = Morning, 2 = Night)
+      if (e.code === 'Digit1' || e.code === 'Numpad1') {
+        this.atmosphere.transitionToTime(0.08);
+        this.ui.showNotification({
+          type: 'info',
+          message: '🌅 Наступает утро...',
+        });
+      } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
+        this.atmosphere.transitionToTime(0.72);
+        this.ui.showNotification({
+          type: 'info',
+          message: '🌙 Наступает ночь...',
+        });
+      }
 
       // Jump & Interaction keys
       if (e.code === 'Space') {
@@ -478,7 +498,7 @@ class ColisGame {
     }
 
     // Update sky dome and ocean waves
-    this.atmosphere.update(dt, this.renderer.camera.position);
+    this.atmosphere.update(dt, this.renderer.camera.position, this.renderer.currentCameraTarget);
 
     // Render 3D Scene
     this.renderer.render();
