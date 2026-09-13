@@ -10,6 +10,7 @@ import {
   RoomState,
   ServerMessage,
   ServerOpCode,
+  InteractBoxDropPayload,
   ShelfState,
   Vector3D,
   WorldTickPayload,
@@ -180,10 +181,10 @@ export class NetworkClient {
     });
   }
 
-  public sendDropBox(): void {
+  public sendDropBox(payload: InteractBoxDropPayload = {}): void {
     this.send({
       op: ClientOpCode.INTERACT_BOX_DROP,
-      data: {},
+      data: payload,
     });
   }
 

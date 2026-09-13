@@ -22,7 +22,7 @@ export class InstancedShelfManager {
       const geometry = this.createProductGeometry(prod);
       const material = this.createProductMaterial(prod);
 
-      const maxInstances = 600; // supports hundreds of items on display
+      const maxInstances = 1200; // supports thousands of items on display
       const mesh = new THREE.InstancedMesh(geometry, material, maxInstances);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -127,16 +127,24 @@ export class InstancedShelfManager {
           slot.localOffset.z
         );
 
-        // A slot can have multiple items lined up in depth (Z-axis of the slot)
-        const depthSpacing = prod.dimensions.depth * 1.15;
-        const totalDepth = (slot.count - 1) * depthSpacing;
-        const startZ = -totalDepth / 2;
+        // 2D Grid Layout: numCols across X (left to right), numRows deep in Z (front to back)
+        const numCols = prod.shelfCols || 4;
+        const numRows = prod.shelfRows || 3;
 
+        const colSpacing = prod.dimensions.width * 1.15;
+        const rowSpacing = prod.dimensions.depth * 1.15;
+        const frontZ = ((numRows - 1) / 2) * rowSpacing;
+
+        // Fill front row first (row 0 facing aisle +Z), subsequent rows behind (-Z)
         for (let itemIdx = 0; itemIdx < slot.count; itemIdx++) {
           if (buffer.currentCount >= buffer.maxCount) break;
 
+          const col = itemIdx % numCols;
+          const row = Math.floor(itemIdx / numCols);
+
           const itemLocalPos = slotLocalPos.clone();
-          itemLocalPos.z += startZ + itemIdx * depthSpacing;
+          itemLocalPos.x += (col - (numCols - 1) / 2) * colSpacing;
+          itemLocalPos.z += frontZ - row * rowSpacing;
 
           // Apply shelf rotation to local slot offset
           itemLocalPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), shelfRotY);

@@ -34,7 +34,12 @@ export class BoxEntityManager {
       }
 
       group.visible = true;
-      group.position.set(box.position.x, box.position.y, box.position.z);
+      if (!group.userData.targetPosition) {
+        group.userData.targetPosition = new THREE.Vector3(box.position.x, box.position.y, box.position.z);
+        group.position.copy(group.userData.targetPosition);
+      } else {
+        (group.userData.targetPosition as THREE.Vector3).set(box.position.x, box.position.y, box.position.z);
+      }
       group.quaternion.set(box.rotation.x, box.rotation.y, box.rotation.z, box.rotation.w);
 
       this.updateBoxFlaps(group, box.isOpen);
@@ -49,6 +54,21 @@ export class BoxEntityManager {
     }
 
     this.rebuildInteractiveList();
+  }
+
+  public update(dt: number): void {
+    const lerpFactor = Math.min(1, 22 * dt);
+    for (const group of this.boxMeshes.values()) {
+      if (!group.visible) continue;
+      const targetPos = group.userData.targetPosition as THREE.Vector3 | undefined;
+      if (targetPos) {
+        if (group.position.distanceToSquared(targetPos) > 16) {
+          group.position.copy(targetPos);
+        } else {
+          group.position.lerp(targetPos, lerpFactor);
+        }
+      }
+    }
   }
 
   private buildBoxMesh(box: BoxState): THREE.Group {

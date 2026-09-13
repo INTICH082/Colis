@@ -14,6 +14,9 @@ export class UIOverlay {
   private elNotifications: HTMLElement;
   private elModal: HTMLElement;
   private elProductGrid: HTMLElement;
+  private elThrowCard: HTMLElement;
+  private elThrowPct: HTMLElement;
+  private elThrowFill: HTMLElement;
 
   private onOrderCallback?: (productId: string, quantity: number) => void;
   private onChangeRoomCallback?: (roomId: string) => void;
@@ -32,6 +35,9 @@ export class UIOverlay {
     this.elNotifications = document.getElementById('notifications')!;
     this.elModal = document.getElementById('delivery-modal')!;
     this.elProductGrid = document.getElementById('delivery-product-grid')!;
+    this.elThrowCard = document.getElementById('throw-charge-card')!;
+    this.elThrowPct = document.getElementById('throw-charge-pct')!;
+    this.elThrowFill = document.getElementById('throw-charge-fill')!;
 
     this.setupEventListeners();
     this.renderDeliveryProducts();
@@ -159,5 +165,17 @@ export class UIOverlay {
       item.style.transition = 'opacity 0.4s';
       setTimeout(() => item.remove(), 400);
     }, 4000);
+  }
+
+  public setThrowCharge(chargeRatio: number | null): void {
+    if (chargeRatio === null) {
+      this.elThrowCard.style.display = 'none';
+      return;
+    }
+
+    this.elThrowCard.style.display = 'flex';
+    const percent = Math.round(Math.max(0, Math.min(1, chargeRatio)) * 100);
+    this.elThrowPct.textContent = `${percent}%`;
+    this.elThrowFill.style.width = `${percent}%`;
   }
 }

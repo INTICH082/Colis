@@ -27,6 +27,8 @@ export interface ProductDefinition {
     depth: number;
   };
   boxCapacity: number; // how many units fit in one delivery box
+  shelfCols?: number;  // items across in width (left to right)
+  shelfRows?: number;  // rows in depth (front to back)
 }
 
 export interface BoxState {

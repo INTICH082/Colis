@@ -22,7 +22,7 @@ export const SHELF_CONFIG = {
   HEIGHT: 2.1,
   TIERS: 3,
   SLOTS_PER_TIER: 4,
-  MAX_ITEMS_PER_SLOT: 6, // 6 cans/boxes per slot in depth
+  MAX_ITEMS_PER_SLOT: 12, // Up to 12 cans/bottles per slot in 3x4 grid
   TIER_Y_OFFSETS: [0.45, 1.05, 1.65], // vertical offsets for 3 shelves
 } as const;
 
@@ -39,6 +39,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'can',
     dimensions: { width: 0.09, height: 0.18, depth: 0.09 },
     boxCapacity: 12,
+    shelfCols: 4,
+    shelfRows: 3,
   },
   'orange_soda': {
     id: 'orange_soda',
@@ -52,6 +54,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'can',
     dimensions: { width: 0.09, height: 0.18, depth: 0.09 },
     boxCapacity: 12,
+    shelfCols: 4,
+    shelfRows: 3,
   },
   'cereal_crunch': {
     id: 'cereal_crunch',
@@ -65,6 +69,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'box_tall',
     dimensions: { width: 0.14, height: 0.26, depth: 0.08 },
     boxCapacity: 8,
+    shelfCols: 4,
+    shelfRows: 2,
   },
   'fresh_milk': {
     id: 'fresh_milk',
@@ -78,6 +84,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'carton',
     dimensions: { width: 0.11, height: 0.22, depth: 0.11 },
     boxCapacity: 8,
+    shelfCols: 4,
+    shelfRows: 2,
   },
   'pasta_spaghetti': {
     id: 'pasta_spaghetti',
@@ -91,6 +99,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'box_wide',
     dimensions: { width: 0.13, height: 0.22, depth: 0.07 },
     boxCapacity: 10,
+    shelfCols: 5,
+    shelfRows: 2,
   },
   'coffee_jar': {
     id: 'coffee_jar',
@@ -104,6 +114,8 @@ export const PRODUCTS: Record<string, ProductDefinition> = {
     modelType: 'bottle',
     dimensions: { width: 0.1, height: 0.16, depth: 0.1 },
     boxCapacity: 8,
+    shelfCols: 4,
+    shelfRows: 2,
   },
 };
 

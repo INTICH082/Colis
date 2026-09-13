@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 /**
- * Second-Order Dynamics / Spring-Damper numerical solver.
- * Simulates mass-spring-damper physics with exact semi-implicit integration.
+ * Second-Order Dynamics / Spring-Damper exact analytical numerical solver.
+ * Uses closed-form solution of damped harmonic oscillator (Ryan Juckett formulation).
+ * 100% unconditionally stable for any delta time and oscillation frequency (never blows up or NaNs).
  */
 export class SpringDamper {
   public value: number;
@@ -17,16 +18,46 @@ export class SpringDamper {
   }
 
   public update(target: number, dt: number): number {
-    const clampedDt = Math.min(Math.max(dt, 0.0001), 0.05);
+    if (dt <= 0) return this.value;
+    const clampedDt = Math.min(dt, 0.1);
     const omega = 2 * Math.PI * this.frequency;
-    const k = omega * omega;
-    const c = 2 * this.damping * omega;
+    const zeta = this.damping;
 
-    const force = -k * (this.value - target) - c * this.velocity;
-    this.velocity += force * clampedDt;
-    this.value += this.velocity * clampedDt;
+    if (zeta < 1.0) {
+      // Underdamped regime
+      const omegaD = omega * Math.sqrt(1.0 - zeta * zeta);
+      const decay = Math.exp(-zeta * omega * clampedDt);
+      const sinTerm = Math.sin(omegaD * clampedDt);
+      const cosTerm = Math.cos(omegaD * clampedDt);
 
-    if (isNaN(this.value)) {
+      const deltaX = this.value - target;
+      const c2 = sinTerm / omegaD;
+      const c1 = cosTerm + zeta * omega * c2;
+
+      this.value = target + decay * (deltaX * c1 + this.velocity * c2);
+      this.velocity = decay * (this.velocity * (cosTerm - zeta * omega * c2) - deltaX * (omega * omega * c2));
+    } else if (zeta === 1.0) {
+      // Critically damped regime
+      const decay = Math.exp(-omega * clampedDt);
+      const deltaX = this.value - target;
+      this.value = target + decay * (deltaX + (this.velocity + omega * deltaX) * clampedDt);
+      this.velocity = decay * (this.velocity * (1.0 - omega * clampedDt) - deltaX * (omega * omega * clampedDt));
+    } else {
+      // Overdamped regime
+      const omegaD = omega * Math.sqrt(zeta * zeta - 1.0);
+      const decay = Math.exp(-zeta * omega * clampedDt);
+      const sinhTerm = Math.sinh(omegaD * clampedDt);
+      const coshTerm = Math.cosh(omegaD * clampedDt);
+
+      const deltaX = this.value - target;
+      const c2 = sinhTerm / omegaD;
+      const c1 = coshTerm + zeta * omega * c2;
+
+      this.value = target + decay * (deltaX * c1 + this.velocity * c2);
+      this.velocity = decay * (this.velocity * (coshTerm - zeta * omega * c2) - deltaX * (omega * omega * c2));
+    }
+
+    if (isNaN(this.value) || !isFinite(this.value)) {
       this.value = target;
       this.velocity = 0;
     }
@@ -140,9 +171,9 @@ export class ActiveRagdollController {
 
   // Legs Dynamics Springs
   public rLegPitchSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
-  public rLegRollSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
+  public rLegRollSpring: SpringDamper = new SpringDamper(-0.05, 17, 0.78);
   public lLegPitchSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
-  public lLegRollSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
+  public lLegRollSpring: SpringDamper = new SpringDamper(0.05, 17, 0.78);
 
   // Gait Engine State
   private gaitPhase: number = 0;
@@ -162,27 +193,48 @@ export class ActiveRagdollController {
   private recordRestPoses(): void {
     if (this.bones.torso) {
       this.restTorsoY = this.bones.torso.position.y || 1.25;
+      this.bones.torso.rotation.order = 'XYZ';
       this.torsoYSpring.reset(this.restTorsoY);
+      this.torsoPitchSpring.reset(0);
+      this.torsoRollSpring.reset(0);
+      this.torsoYawSpring.reset(0);
     }
     if (this.bones.head) {
       this.restHeadY = this.bones.head.position.y || 0.125;
+      this.bones.head.rotation.order = 'XYZ';
+      this.headPitchSpring.reset(0);
+      this.headRollSpring.reset(0);
+      this.headYawSpring.reset(0);
     }
     if (this.bones.rLeg) {
       this.restRLegPos.copy(this.bones.rLeg.position);
+      this.bones.rLeg.rotation.order = 'XYZ';
+      this.rLegPitchSpring.reset(0);
+      this.rLegRollSpring.reset(-0.05);
     }
     if (this.bones.lLeg) {
       this.restLLegPos.copy(this.bones.lLeg.position);
+      this.bones.lLeg.rotation.order = 'XYZ';
+      this.lLegPitchSpring.reset(0);
+      this.lLegRollSpring.reset(0.05);
     }
     if (this.bones.rHand) {
       this.restRHandPos.copy(this.bones.rHand.position);
       this.bones.rHand.rotation.order = 'XYZ';
       this.bones.rHand.position.copy(this.restRHandPos);
+      this.rArmPitchSpring.reset(0);
+      this.rArmRollSpring.reset(-0.15);
+      this.rArmYawSpring.reset(0);
     }
     if (this.bones.lHand) {
       this.restLHandPos.copy(this.bones.lHand.position);
       this.bones.lHand.rotation.order = 'XYZ';
       this.bones.lHand.position.copy(this.restLHandPos);
+      this.lArmPitchSpring.reset(0);
+      this.lArmRollSpring.reset(0.15);
+      this.lArmYawSpring.reset(0);
     }
+    this.landingSquashSpring.reset(0);
   }
 
   public setBones(bones: CharacterBones): void {
@@ -239,7 +291,8 @@ export class ActiveRagdollController {
     let rotDiff = playerRotationY - this.prevRotY;
     while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
     while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-    const currentRotVel = dt > 0.0001 ? rotDiff / dt : 0;
+    const rawRotVel = dt > 0.0001 ? rotDiff / dt : 0;
+    const currentRotVel = THREE.MathUtils.clamp(rawRotVel, -15, 15);
     // Continuous deadzone: eliminates abrupt step at threshold
     const rotAbs = Math.abs(currentRotVel);
     const filteredRotVel = rotAbs > 0.25 ? Math.sign(currentRotVel) * (rotAbs - 0.25) : 0;

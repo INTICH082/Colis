@@ -2,6 +2,7 @@ import {
   BoxState,
   ClientMessage,
   ClientOpCode,
+  InteractBoxDropPayload,
   InteractBoxPickupPayload,
   InteractPlaceProductPayload,
   InteractTakeProductPayload,
@@ -33,6 +34,7 @@ export class StoreRoom {
   private players: Map<string, { state: PlayerState; ws: WebSocket }> = new Map();
   private shelves: Map<string, ShelfState> = new Map();
   private boxes: Map<string, BoxState> = new Map();
+  private flyingBoxes: Map<string, { vx: number; vy: number; vz: number }> = new Map();
   private storeMoney: number = 1500;
   private storeLevel: number = 1;
 
@@ -137,6 +139,7 @@ export class StoreRoom {
       this.tickTimer = null;
     }
     this.players.clear();
+    this.flyingBoxes.clear();
   }
 
   private tick(): void {
@@ -170,6 +173,69 @@ export class StoreRoom {
             z: p.state.position.z - Math.cos(p.state.rotationY) * carryDistance,
           };
         }
+      }
+    }
+
+    // Update physics for thrown flying boxes
+    if (this.flyingBoxes.size > 0) {
+      const dt = NETWORK_CONFIG.TICK_INTERVAL_MS / 1000;
+      const halfW = STORE_LAYOUT.FLOOR_WIDTH / 2 - 0.4;
+      const halfD = STORE_LAYOUT.FLOOR_DEPTH / 2 - 0.4;
+
+      for (const [boxId, flight] of Array.from(this.flyingBoxes.entries())) {
+        const box = this.boxes.get(boxId);
+        if (!box || box.isHeld) {
+          this.flyingBoxes.delete(boxId);
+          continue;
+        }
+
+        flight.vy -= 16.0 * dt; // gravity
+        flight.vx *= Math.pow(0.96, dt * 25); // air drag
+        flight.vz *= Math.pow(0.96, dt * 25);
+
+        box.position.x += flight.vx * dt;
+        box.position.y += flight.vy * dt;
+        box.position.z += flight.vz * dt;
+
+        // Store boundary collisions (walls)
+        if (box.position.x < -halfW) {
+          box.position.x = -halfW;
+          flight.vx = -flight.vx * 0.4;
+        } else if (box.position.x > halfW) {
+          box.position.x = halfW;
+          flight.vx = -flight.vx * 0.4;
+        }
+
+        if (box.position.z < -halfD) {
+          box.position.z = -halfD;
+          flight.vz = -flight.vz * 0.4;
+        } else if (box.position.z > halfD) {
+          box.position.z = halfD;
+          flight.vz = -flight.vz * 0.4;
+        }
+
+        // Floor collision
+        if (box.position.y <= 0.18) {
+          box.position.y = 0.18;
+          if (flight.vy < -2.0) {
+            flight.vy = -flight.vy * 0.35; // bounce
+            flight.vx *= 0.65;
+            flight.vz *= 0.65;
+          } else {
+            flight.vy = 0;
+            flight.vx *= 0.5;
+            flight.vz *= 0.5;
+          }
+
+          if (Math.hypot(flight.vx, flight.vy, flight.vz) < 0.25) {
+            this.flyingBoxes.delete(boxId);
+          }
+        }
+
+        this.broadcast({
+          op: ServerOpCode.BOX_STATE_CHANGED,
+          data: box,
+        });
       }
     }
 
@@ -286,7 +352,7 @@ export class StoreRoom {
         break;
 
       case ClientOpCode.INTERACT_BOX_DROP:
-        this.handleDropBox(playerId);
+        this.handleDropBox(playerId, message.data);
         break;
 
       case ClientOpCode.INTERACT_BOX_OPEN:
@@ -329,7 +395,7 @@ export class StoreRoom {
     // If the victim was holding a box, drop it!
     const victim = this.players.get(data.victimId);
     if (victim && victim.state.heldBoxId) {
-      this.handleDropBox(data.victimId);
+      this.handleDropBox(data.victimId, { throwForce: 0.35 });
     }
   }
 
@@ -396,7 +462,7 @@ export class StoreRoom {
     });
   }
 
-  private handleDropBox(playerId: string): void {
+  private handleDropBox(playerId: string, data?: InteractBoxDropPayload): void {
     const entry = this.players.get(playerId);
     if (!entry || !entry.state.heldBoxId) return;
 
@@ -407,18 +473,49 @@ export class StoreRoom {
     box.heldByPlayerId = null;
     entry.state.heldBoxId = null;
 
-    // Drop on floor in front of player
-    const dropDist = 0.75;
-    box.position = {
-      x: entry.state.position.x - Math.sin(entry.state.rotationY) * dropDist,
-      y: 0.2,
-      z: entry.state.position.z - Math.cos(entry.state.rotationY) * dropDist,
-    };
+    const rotY = entry.state.rotationY;
+    const throwForce = data?.throwForce ?? 0;
 
-    this.broadcast({
-      op: ServerOpCode.BOX_STATE_CHANGED,
-      data: box,
-    });
+    if (throwForce <= 0.05) {
+      // Gentle drop on floor in front of player
+      const dropDist = 0.75;
+      box.position = {
+        x: entry.state.position.x - Math.sin(rotY) * dropDist,
+        y: 0.18,
+        z: entry.state.position.z - Math.cos(rotY) * dropDist,
+      };
+      this.flyingBoxes.delete(box.id);
+      this.broadcast({
+        op: ServerOpCode.BOX_STATE_CHANGED,
+        data: box,
+      });
+    } else {
+      // Active throw with physical trajectory
+      const startDist = 0.65;
+      box.position = {
+        x: entry.state.position.x - Math.sin(rotY) * startDist,
+        y: entry.state.position.y + 0.85,
+        z: entry.state.position.z - Math.cos(rotY) * startDist,
+      };
+
+      const speed = 3.5 + Math.min(throwForce, 1.0) * 11.5;
+      let vx = data?.throwVelocity?.x ?? (-Math.sin(rotY) * speed);
+      let vy = data?.throwVelocity?.y ?? (1.6 + throwForce * 3.6);
+      let vz = data?.throwVelocity?.z ?? (-Math.cos(rotY) * speed);
+
+      // Clamp velocities for safety
+      const maxSpd = 20;
+      vx = Math.max(-maxSpd, Math.min(maxSpd, vx));
+      vy = Math.max(-maxSpd, Math.min(maxSpd, vy));
+      vz = Math.max(-maxSpd, Math.min(maxSpd, vz));
+
+      this.flyingBoxes.set(box.id, { vx, vy, vz });
+
+      this.broadcast({
+        op: ServerOpCode.BOX_STATE_CHANGED,
+        data: box,
+      });
+    }
   }
 
   private handleOpenBox(playerId: string, targetBoxId?: string): void {
@@ -480,8 +577,15 @@ export class StoreRoom {
       return;
     }
 
-    if (slot.count >= slot.maxCount) {
-      this.sendError(playerId, 'Слот уже заполнен');
+    const prod = PRODUCTS[box.productId];
+    const maxSlotCapacity = (prod && prod.shelfCols && prod.shelfRows)
+      ? prod.shelfCols * prod.shelfRows
+      : (prod?.boxCapacity || SHELF_CONFIG.MAX_ITEMS_PER_SLOT);
+
+    slot.maxCount = maxSlotCapacity;
+
+    if (slot.count >= maxSlotCapacity) {
+      this.sendError(playerId, `Слот уже заполнен (макс. ${maxSlotCapacity} шт.)`);
       return;
     }
 

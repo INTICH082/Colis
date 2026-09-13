@@ -48,6 +48,8 @@ export interface InteractBoxPickupPayload {
 
 export interface InteractBoxDropPayload {
   position?: Vector3D;
+  throwForce?: number; // 0 for gentle drop, 0.1-1.0 for throw
+  throwVelocity?: Vector3D;
 }
 
 export interface InteractBoxOpenPayload {

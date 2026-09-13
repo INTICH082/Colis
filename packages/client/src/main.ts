@@ -54,6 +54,10 @@ class ColisGame {
   private verticalVelocity: number = 0;
   private isGrounded: boolean = true;
 
+  // Throw charge state
+  private isChargingThrow: boolean = false;
+  private throwChargeStartTime: number = 0;
+
   // Hovered target
   private hoveredSlot: { shelfId: string; slotIndex: number; mesh: THREE.Mesh } | null = null;
   private hoveredBox: { boxId: string; mesh: THREE.Mesh } | null = null;
@@ -143,12 +147,20 @@ class ColisGame {
       } else if (e.code === 'KeyR') {
         this.handleActionOpenBox();
       } else if (e.code === 'KeyG') {
-        this.network.sendDropBox();
+        if (!e.repeat && this.localPlayerState.heldBoxId && !this.localPlayerEntity?.isKnockedDown()) {
+          this.isChargingThrow = true;
+          this.throwChargeStartTime = performance.now();
+          this.ui.setThrowCharge(0);
+        }
       }
     });
 
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
+
+      if (e.code === 'KeyG' && this.isChargingThrow) {
+        this.finishThrowCharge();
+      }
     });
 
     window.addEventListener('mousedown', (e) => {
@@ -173,6 +185,10 @@ class ColisGame {
     // Reset all pressed keys when window loses/gains focus or tab is hidden
     const clearKeys = () => {
       this.keys = {};
+      if (this.isChargingThrow) {
+        this.isChargingThrow = false;
+        this.ui.setThrowCharge(null);
+      }
     };
 
     window.addEventListener('blur', clearKeys);
@@ -209,9 +225,9 @@ class ColisGame {
   }
 
   private handleActionE(): void {
-    // If holding box, drop it
+    // If holding box, gentle drop
     if (this.localPlayerState.heldBoxId) {
-      this.network.sendDropBox();
+      this.network.sendDropBox({ throwForce: 0 });
       return;
     }
 
@@ -227,6 +243,52 @@ class ColisGame {
     } else if (this.hoveredBox) {
       this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
     }
+  }
+
+  private updateThrowCharging(): void {
+    if (!this.isChargingThrow) return;
+
+    if (!this.localPlayerState.heldBoxId || this.localPlayerEntity?.isKnockedDown()) {
+      this.isChargingThrow = false;
+      this.ui.setThrowCharge(null);
+      return;
+    }
+
+    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
+    if (elapsedSec < 0.2) {
+      this.ui.setThrowCharge(0);
+    } else {
+      const ratio = THREE.MathUtils.clamp((elapsedSec - 0.2) / 1.0, 0, 1);
+      this.ui.setThrowCharge(ratio);
+    }
+  }
+
+  private finishThrowCharge(): void {
+    if (!this.isChargingThrow) return;
+    this.isChargingThrow = false;
+    this.ui.setThrowCharge(null);
+
+    if (!this.localPlayerState.heldBoxId) return;
+
+    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
+    // Quick tap (< 0.2s): gentle placement on floor right in front
+    if (elapsedSec < 0.2) {
+      this.network.sendDropBox({ throwForce: 0 });
+      return;
+    }
+
+    // Charged throw: 0.2s to 1.2s maps to force 0.1 .. 1.0
+    const forceRatio = THREE.MathUtils.clamp((elapsedSec - 0.2) / 1.0, 0.1, 1.0);
+    const rotY = this.localPlayerState.rotationY;
+    const horizSpeed = 3.5 + forceRatio * 11.5; // 3.5m/s to 15.0m/s
+    const vx = -Math.sin(rotY) * horizSpeed;
+    const vz = -Math.cos(rotY) * horizSpeed;
+    const vy = 1.6 + forceRatio * 3.6;
+
+    this.network.sendDropBox({
+      throwForce: forceRatio,
+      throwVelocity: { x: vx, y: vy, z: vz },
+    });
   }
 
   private handleLeftClick(): void {
@@ -393,6 +455,8 @@ class ColisGame {
     this.lastTime = now;
 
     this.updatePlayerMovement(dt);
+    this.updateThrowCharging();
+    this.boxManager.update(dt);
     this.updateRaycasting();
     this.updateInterpolations(dt);
 
@@ -592,7 +656,7 @@ class ColisGame {
               } else if (slot.productId && slot.productId !== heldBox?.productId && slot.count > 0) {
                 this.ui.setInteractionPrompt(`Слот занят другим товаром (${PRODUCTS[slot.productId]?.name})`, '!');
               } else if (slot.count >= slot.maxCount) {
-                this.ui.setInteractionPrompt('Слот полон (макс. 6 шт.)', '!');
+                this.ui.setInteractionPrompt(`Слот полон (макс. ${slot.maxCount} шт.)`, '!');
               } else {
                 this.ui.setInteractionPrompt(
                   `[ЛКМ] Выставить ${prod?.name || 'товар'} (Слот ${slot.index + 1}: ${slot.count}/${slot.maxCount})`,
