@@ -56,10 +56,11 @@ export class GameRenderer {
     this.dirLight.shadow.mapSize.height = 2048;
     this.dirLight.shadow.camera.near = 1.0;
     this.dirLight.shadow.camera.far = 130;
-    this.dirLight.shadow.bias = -0.0001;
-    this.dirLight.shadow.normalBias = 0.03;
+    this.dirLight.shadow.bias = 0.00005;
+    this.dirLight.shadow.normalBias = 0.045;
+    this.dirLight.shadow.radius = 2.0;
 
-    const shadowDist = 34;
+    const shadowDist = 18.0;
     this.dirLight.shadow.camera.left = -shadowDist;
     this.dirLight.shadow.camera.right = shadowDist;
     this.dirLight.shadow.camera.top = shadowDist;

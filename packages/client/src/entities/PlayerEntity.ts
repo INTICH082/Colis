@@ -228,7 +228,8 @@ export class PlayerEntity {
     isSprinting: boolean,
     isAirborne: boolean = false,
     moveX: number = 0,
-    moveZ: number = 0
+    moveZ: number = 0,
+    targetAimY?: number
   ): void {
     if (this.ragdoll) {
       // If knocked down, apply sliding momentum
@@ -247,6 +248,7 @@ export class PlayerEntity {
         worldMoveZ: moveZ,
         playerRotationY: this.group.rotation.y,
         isHoldingBox: this.isHoldingBox,
+        targetAimY,
       });
 
       // Smooth Held Box Visibility & Dynamic Mass Momentum
@@ -273,12 +275,6 @@ export class PlayerEntity {
       // Smooth lerp for remote players
       this.group.position.lerp(this.targetPosition, 15 * dt);
 
-      // Slerp rotation angle
-      let diff = this.targetRotationY - this.group.rotation.y;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      this.group.rotation.y += diff * 15 * dt;
-
       // Determine movement state from velocity
       const moveX = this.group.position.x - this.lastPosition.x;
       const moveZ = this.group.position.z - this.lastPosition.z;
@@ -290,7 +286,15 @@ export class PlayerEntity {
       const isSprinting = speed > 5.2;
       const isAirborne = this.group.position.y > 0.18;
 
-      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ);
+      if (isMoving || isAirborne) {
+        // Slerp rotation angle while walking/running/jumping
+        let diff = this.targetRotationY - this.group.rotation.y;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.group.rotation.y += diff * 15 * dt;
+      }
+
+      this.tick(dt, isMoving, isSprinting, isAirborne, moveX, moveZ, this.targetRotationY);
     }
   }
 

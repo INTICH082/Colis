@@ -592,12 +592,25 @@ class ColisGame {
 
     // Rotate player towards mouse aim or movement direction
     const mouseFloor = this.renderer.getGroundIntersection(0.8);
+    let targetRotationY = this.localPlayerState.rotationY;
     if (mouseFloor) {
       const dx = mouseFloor.x - newPos.x;
       const dz = mouseFloor.z - newPos.z;
-      this.localPlayerState.rotationY = Math.atan2(dx, dz) + Math.PI;
+      targetRotationY = Math.atan2(dx, dz) + Math.PI;
     } else if (isMoving) {
-      this.localPlayerState.rotationY = Math.atan2(worldDir.x, worldDir.z) + Math.PI;
+      targetRotationY = Math.atan2(worldDir.x, worldDir.z) + Math.PI;
+    }
+
+    let rotDiff = targetRotationY - this.localPlayerState.rotationY;
+    while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+    while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+
+    if (isMoving) {
+      // Rapid responsive turning while walking/running (22 rad/s)
+      this.localPlayerState.rotationY += rotDiff * Math.min(1.0, 22.0 * dt);
+    } else {
+      // Smooth, agile, and responsive turning while aiming on the spot (14 rad/s)
+      this.localPlayerState.rotationY += rotDiff * Math.min(1.0, 14.0 * dt);
     }
 
     // Player is only considered airborne when clearly elevated above floor
@@ -614,7 +627,8 @@ class ColisGame {
         isSprinting,
         isAirborne,
         worldDir.x,
-        worldDir.z
+        worldDir.z,
+        targetRotationY
       );
     }
 

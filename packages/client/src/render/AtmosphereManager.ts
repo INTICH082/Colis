@@ -74,7 +74,7 @@ export class AtmosphereManager {
   }
 
   private initLights(existingDirLight?: THREE.DirectionalLight): void {
-    const shadowFrustumSize = 38.0;
+    const shadowFrustumSize = 18.0;
 
     // 1. Sun Directional Light
     if (existingDirLight) {
@@ -90,8 +90,9 @@ export class AtmosphereManager {
     this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 0.5;
     this.sunLight.shadow.camera.far = 140.0;
-    this.sunLight.shadow.bias = -0.0001;
-    this.sunLight.shadow.normalBias = 0.03;
+    this.sunLight.shadow.bias = 0.00005;
+    this.sunLight.shadow.normalBias = 0.045;
+    this.sunLight.shadow.radius = 2.0;
     this.sunLight.shadow.camera.left = -shadowFrustumSize;
     this.sunLight.shadow.camera.right = shadowFrustumSize;
     this.sunLight.shadow.camera.top = shadowFrustumSize;
@@ -107,8 +108,9 @@ export class AtmosphereManager {
     this.moonLight.shadow.mapSize.height = 2048;
     this.moonLight.shadow.camera.near = 0.5;
     this.moonLight.shadow.camera.far = 140.0;
-    this.moonLight.shadow.bias = -0.0001;
-    this.moonLight.shadow.normalBias = 0.03;
+    this.moonLight.shadow.bias = 0.00005;
+    this.moonLight.shadow.normalBias = 0.045;
+    this.moonLight.shadow.radius = 2.0;
     this.moonLight.shadow.camera.left = -shadowFrustumSize;
     this.moonLight.shadow.camera.right = shadowFrustumSize;
     this.moonLight.shadow.camera.top = shadowFrustumSize;
@@ -559,22 +561,26 @@ export class AtmosphereManager {
       color: 0x475569,
       roughness: 0.85,
       metalness: 0.08,
+      dithering: true,
     });
 
     const dockWoodMat = new THREE.MeshStandardMaterial({
       color: 0x785338,
       roughness: 0.75,
       metalness: 0.05,
+      dithering: true,
     });
 
     const curbMat = new THREE.MeshStandardMaterial({
       color: 0x334155,
       roughness: 0.7,
+      dithering: true,
     });
 
     const pilingMat = new THREE.MeshStandardMaterial({
       color: 0x3e2723,
       roughness: 0.9,
+      dithering: true,
     });
 
     // 1. Concrete foundation slab underneath supermarket
@@ -753,7 +759,7 @@ export class AtmosphereManager {
     // With 2048x2048 shadow map and 76.0m frustum, 1 texel = 76.0 / 2048 ≈ 0.0371m.
     // Snapping the light focus to world-space texel boundaries keeps the shadow projection
     // matrix rigidly aligned with the world geometry, eliminating shadow jitter and swimming!
-    const shadowFrustumSize = 38.0;
+    const shadowFrustumSize = 18.0;
     const shadowMapSize = 2048;
     const worldTexelSize = (shadowFrustumSize * 2.0) / shadowMapSize;
     const snappedFocusX = Math.round(focus.x / worldTexelSize) * worldTexelSize;
@@ -769,14 +775,14 @@ export class AtmosphereManager {
     const moonIntensity = nightWeight * (0.18 + 0.32 * moonElevFactor);
 
     // Seamless shadow caster transition:
-    // Sun casts shadows while above twilight; Moon takes over cleanly at night.
-    const sunCastsShadow = sunElev > -0.02 && sunIntensity > 0.01;
+    // Avoid extreme grazing angles (below 0.05 elev) where shadow acne on floors/walls becomes prominent
+    const sunCastsShadow = sunElev > 0.05 && sunIntensity > 0.05;
     if (sunCastsShadow) {
       if (!this.sunLight.castShadow) this.sunLight.castShadow = true;
       if (this.moonLight.castShadow) this.moonLight.castShadow = false;
     } else {
       if (this.sunLight.castShadow) this.sunLight.castShadow = false;
-      const moonCastsShadow = moonElev > 0.02 && moonIntensity > 0.05;
+      const moonCastsShadow = moonElev > 0.05 && moonIntensity > 0.05;
       if (this.moonLight.castShadow !== moonCastsShadow) {
         this.moonLight.castShadow = moonCastsShadow;
       }
@@ -784,10 +790,10 @@ export class AtmosphereManager {
 
     const lightDist = 65.0;
 
-    // Position Sun Light toward snapped ground focus point
+    // Position Sun Light toward snapped ground focus point (min height 8.0m ensures rays clear roof and don't graze)
     this.sunLight.color.copy(this.currentSunColor);
     this.sunLight.intensity = sunIntensity;
-    const sunY = Math.max(0.8, this.currentSunDir.y * lightDist);
+    const sunY = Math.max(8.0, this.currentSunDir.y * lightDist);
     this.sunLight.position.set(
       snappedFocusX + this.currentSunDir.x * lightDist,
       sunY,
@@ -799,7 +805,7 @@ export class AtmosphereManager {
     // Position Moon Light toward snapped ground focus point
     this.moonLight.color.copy(this.colMoon);
     this.moonLight.intensity = moonIntensity;
-    const moonY = Math.max(0.8, this.currentMoonDir.y * lightDist);
+    const moonY = Math.max(8.0, this.currentMoonDir.y * lightDist);
     this.moonLight.position.set(
       snappedFocusX + this.currentMoonDir.x * lightDist,
       moonY,

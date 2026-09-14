@@ -94,6 +94,7 @@ export interface RagdollInputState {
   worldMoveZ: number;
   playerRotationY: number;
   isHoldingBox: boolean;
+  targetAimY?: number;
 }
 
 export type RagdollStatus = 'ACTIVE' | 'KNOCKED_DOWN' | 'GETTING_UP';
@@ -169,11 +170,19 @@ export class ActiveRagdollController {
   public boxOffsetRoll: SpringDamper = new SpringDamper(0, 10, 0.82);
   public boxOffsetY: SpringDamper = new SpringDamper(0, 12, 0.85);
 
-  // Legs Dynamics Springs
-  public rLegPitchSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
-  public rLegRollSpring: SpringDamper = new SpringDamper(-0.05, 17, 0.78);
-  public lLegPitchSpring: SpringDamper = new SpringDamper(0, 17, 0.78);
-  public lLegRollSpring: SpringDamper = new SpringDamper(0.05, 17, 0.78);
+  // Legs Dynamics Springs (Crisp & snappy for visible high stepping)
+  public rLegPitchSpring: SpringDamper = new SpringDamper(0, 22, 0.74);
+  public rLegRollSpring: SpringDamper = new SpringDamper(-0.05, 20, 0.74);
+  public rLegYawSpring: SpringDamper = new SpringDamper(0, 22, 0.75);
+  public lLegPitchSpring: SpringDamper = new SpringDamper(0, 22, 0.74);
+  public lLegRollSpring: SpringDamper = new SpringDamper(0.05, 20, 0.74);
+  public lLegYawSpring: SpringDamper = new SpringDamper(0, 22, 0.75);
+
+  // Procedural Turn-In-Place Stepping Engine (Rhythmic, natural, physical alternating foot shuffle)
+  public isTurnStepping: boolean = false;
+  public turnGaitPhase: number = 0;
+  public turnStepDir: number = 1; // +1 = left, -1 = right
+  public currentBodyRotationY: number = 0;
 
   // Gait Engine State
   private gaitPhase: number = 0;
@@ -211,12 +220,14 @@ export class ActiveRagdollController {
       this.bones.rLeg.rotation.order = 'XYZ';
       this.rLegPitchSpring.reset(0);
       this.rLegRollSpring.reset(-0.05);
+      this.rLegYawSpring.reset(0);
     }
     if (this.bones.lLeg) {
       this.restLLegPos.copy(this.bones.lLeg.position);
       this.bones.lLeg.rotation.order = 'XYZ';
       this.lLegPitchSpring.reset(0);
       this.lLegRollSpring.reset(0.05);
+      this.lLegYawSpring.reset(0);
     }
     if (this.bones.rHand) {
       this.restRHandPos.copy(this.bones.rHand.position);
@@ -286,6 +297,7 @@ export class ActiveRagdollController {
     // 1. Angular Velocity Calculation (centrifugal lean & turns) with continuous deadzone to eliminate mouse jitter
     if (!this.hasInitializedRot) {
       this.prevRotY = playerRotationY;
+      this.currentBodyRotationY = playerRotationY;
       this.hasInitializedRot = true;
     }
     let rotDiff = playerRotationY - this.prevRotY;
@@ -295,9 +307,58 @@ export class ActiveRagdollController {
     const currentRotVel = THREE.MathUtils.clamp(rawRotVel, -15, 15);
     // Continuous deadzone: eliminates abrupt step at threshold
     const rotAbs = Math.abs(currentRotVel);
-    const filteredRotVel = rotAbs > 0.25 ? Math.sign(currentRotVel) * (rotAbs - 0.25) : 0;
-    this.rotVelocityY = THREE.MathUtils.lerp(this.rotVelocityY, filteredRotVel, Math.min(1, 10 * dt));
+    const filteredRotVel = rotAbs > 0.15 ? Math.sign(currentRotVel) * (rotAbs - 0.15) : 0;
+    this.rotVelocityY = THREE.MathUtils.lerp(this.rotVelocityY, filteredRotVel, Math.min(1, 14 * dt));
     this.prevRotY = playerRotationY;
+
+    this.currentBodyRotationY = playerRotationY;
+
+    // Procedural Turn-In-Place Stepping Engine (Rhythmic, natural, physical alternating foot shuffle)
+    if (isMoving || isAirborne) {
+      this.isTurnStepping = false;
+      this.turnGaitPhase = 0;
+    } else {
+      let aimDiff = 0;
+      if (state.targetAimY !== undefined) {
+        aimDiff = state.targetAimY - playerRotationY;
+        while (aimDiff < -Math.PI) aimDiff += Math.PI * 2;
+        while (aimDiff > Math.PI) aimDiff -= Math.PI * 2;
+      }
+
+      if (!this.isTurnStepping) {
+        // Trigger stepping if angle difference > 0.12 rad (~7 deg) or turning fast
+        if (Math.abs(aimDiff) > 0.12 || Math.abs(this.rotVelocityY) > 0.35) {
+          this.isTurnStepping = true;
+          this.turnStepDir = Math.sign(aimDiff !== 0 ? aimDiff : this.rotVelocityY) || 1;
+          this.turnGaitPhase = 0;
+        }
+      }
+
+      if (this.isTurnStepping) {
+        const prevPhase = this.turnGaitPhase;
+        // Step frequency ~10.5 rad/s (approx 3.3 steps per second)
+        this.turnGaitPhase += 10.5 * dt;
+
+        const prevStepIdx = Math.floor(prevPhase / Math.PI);
+        const curStepIdx = Math.floor(this.turnGaitPhase / Math.PI);
+
+        // Half-cycle boundary: a foot has completed its swing and struck the floor
+        if (curStepIdx > prevStepIdx) {
+          // Foot landing knee-cushion impulse
+          this.landingSquashSpring.impulse(0.8);
+          this.torsoYSpring.impulse(-0.35);
+
+          // Check if another step is needed
+          if (Math.abs(aimDiff) > 0.10 || Math.abs(this.rotVelocityY) > 0.25) {
+            this.turnStepDir = Math.sign(aimDiff !== 0 ? aimDiff : this.rotVelocityY) || 1;
+          } else {
+            // Turn complete: clean landing on both feet
+            this.isTurnStepping = false;
+            this.turnGaitPhase = 0;
+          }
+        }
+      }
+    }
 
     // 2. Continuous Locomotion Blending Parameters (Smooth Idle <-> Walk <-> Sprint)
     const targetMoveWeight = isMoving ? 1.0 : 0.0;
@@ -390,9 +451,11 @@ export class ActiveRagdollController {
       this.recoveryTimer -= dt;
     }
 
-    // 8. Update Gait Phase continuously based on effective speed
+    // 8. Update Gait Phase continuously based on effective speed or turn-in-place
+    // 8. Update Locomotion Gait Phase based on movement speed
     const baseStrideFreq = 6.6 + 3.0 * this.sprintWeight;
-    const effectiveStrideFreq = isAirborne ? 4.2 : (baseStrideFreq * (0.25 + 0.75 * this.moveWeight));
+    const effectiveStrideFreq = isAirborne ? 4.2 : baseStrideFreq * (0.25 + 0.75 * this.moveWeight);
+
     if (this.moveWeight > 0.01 || isAirborne) {
       this.gaitPhase += effectiveStrideFreq * dt;
     }
@@ -424,8 +487,10 @@ export class ActiveRagdollController {
       const curLPitch = this.lLegPitchSpring.update(-0.5, dt);
       const curRRoll = this.rLegRollSpring.update(-0.6, dt);
       const curLRoll = this.lLegRollSpring.update(0.6, dt);
-      this.bones.rLeg.rotation.set(curRPitch, 0, curRRoll);
-      this.bones.lLeg.rotation.set(curLPitch, 0, curLRoll);
+      const curRYaw = this.rLegYawSpring.update(0, dt);
+      const curLYaw = this.lLegYawSpring.update(0, dt);
+      this.bones.rLeg.rotation.set(curRPitch, curRYaw, curRRoll);
+      this.bones.lLeg.rotation.set(curLPitch, curLYaw, curLRoll);
       this.bones.rLeg.position.y = THREE.MathUtils.lerp(this.bones.rLeg.position.y, this.restRLegPos.y, Math.min(1, 15 * dt));
       this.bones.lLeg.position.y = THREE.MathUtils.lerp(this.bones.lLeg.position.y, this.restLLegPos.y, Math.min(1, 15 * dt));
     }
@@ -490,8 +555,10 @@ export class ActiveRagdollController {
       const curLPitch = this.lLegPitchSpring.update(-legScramble, dt);
       const curRRoll = this.rLegRollSpring.update(targetRollR, dt);
       const curLRoll = this.lLegRollSpring.update(targetRollL, dt);
-      this.bones.rLeg.rotation.set(curRPitch, 0, curRRoll);
-      this.bones.lLeg.rotation.set(curLPitch, 0, curLRoll);
+      const curRYaw = this.rLegYawSpring.update(0, dt);
+      const curLYaw = this.lLegYawSpring.update(0, dt);
+      this.bones.rLeg.rotation.set(curRPitch, curRYaw, curRRoll);
+      this.bones.lLeg.rotation.set(curLPitch, curLYaw, curLRoll);
       this.bones.rLeg.position.y = THREE.MathUtils.lerp(this.bones.rLeg.position.y, this.restRLegPos.y, Math.min(1, 15 * dt));
       this.bones.lLeg.position.y = THREE.MathUtils.lerp(this.bones.lLeg.position.y, this.restLLegPos.y, Math.min(1, 15 * dt));
     }
@@ -519,6 +586,13 @@ export class ActiveRagdollController {
     // Locomotion vertical bobbing (scales smoothly with moveWeight)
     const bobAmp = 0.028 + 0.026 * this.sprintWeight;
     targetY += Math.sin(this.gaitPhase * 2) * bobAmp * this.moveWeight;
+
+    // Turn-in-place vertical step bob
+    if (this.isTurnStepping) {
+      const localPhase = this.turnGaitPhase % Math.PI;
+      const liftArc = Math.sin(localPhase);
+      targetY += liftArc * 0.025 - 0.008;
+    }
 
     // Idle breathing when stationary
     const idleWeight = 1.0 - this.moveWeight;
@@ -558,6 +632,15 @@ export class ActiveRagdollController {
     groundRoll += this.localVelRight * (0.16 + 0.08 * this.sprintWeight) * this.moveWeight;
     // Bipedal weight shift (pelvis leans towards stance foot):
     groundRoll += Math.sin(this.gaitPhase) * (0.035 + 0.035 * this.sprintWeight) * this.moveWeight;
+    // Pelvis roll weight shift during turn-in-place:
+    if (this.isTurnStepping) {
+      const localPhase = this.turnGaitPhase % Math.PI;
+      const stepIdx = Math.floor(this.turnGaitPhase / Math.PI);
+      const liftArc = Math.sin(localPhase);
+      const isRightSwing = (this.turnStepDir < 0) ? (stepIdx % 2 === 0) : (stepIdx % 2 === 1);
+      // Lean towards the stance foot supporting the body
+      groundRoll += (isRightSwing ? 0.06 : -0.06) * liftArc;
+    }
     // Idle gentle sway:
     groundRoll += Math.sin(this.totalTime * 1.5) * 0.02 * idleWeight;
     // Box dynamic roll inertia:
@@ -570,6 +653,12 @@ export class ActiveRagdollController {
     let targetYaw = 0;
     // Pelvis counter-twist during walking/sprinting:
     targetYaw += Math.cos(this.gaitPhase) * (0.08 + 0.06 * this.sprintWeight) * this.moveWeight;
+    // Upper body turn anticipation during turn-in-place:
+    if (this.isTurnStepping) {
+      const localPhase = this.turnGaitPhase % Math.PI;
+      const liftArc = Math.sin(localPhase);
+      targetYaw += liftArc * 0.10 * this.turnStepDir;
+    }
     // Box yaw momentum:
     targetYaw += this.boxOffsetYaw.value * 0.35 * this.boxHoldBlend;
 
@@ -595,6 +684,8 @@ export class ActiveRagdollController {
     let groundLPitch = -torsoPitch * 0.9;
     let groundRRoll = -torsoRoll - 0.05;
     let groundLRoll = -torsoRoll + 0.05;
+    let groundRYaw = 0;
+    let groundLYaw = 0;
     let groundRY = this.restRLegPos.y;
     let groundLY = this.restLLegPos.y;
 
@@ -620,8 +711,54 @@ export class ActiveRagdollController {
     groundRY += rSwing * stepLift;
     groundLY += lSwing * stepLift;
 
+    // 1.5. Turn-In-Place Procedural Stepping (Clear, physical alternating foot shuffle)
+    if (this.isTurnStepping) {
+      const localPhase = this.turnGaitPhase % Math.PI;
+      const stepIdx = Math.floor(this.turnGaitPhase / Math.PI);
+      const liftArc = Math.sin(localPhase);
+
+      // Foot vertical lift: 8.5 cm (clearly elevates foot without dislocating hip joint into torso)
+      const footLift = liftArc * 0.085;
+      // Forward knee pitch flex: ~22 degrees
+      const swingPitch = liftArc * 0.38;
+      // Outward foot yaw into turn direction: ~23 degrees
+      const swingYaw = liftArc * 0.40 * this.turnStepDir;
+      // Outward lateral clearance roll: ~6 degrees
+      const swingRoll = liftArc * 0.10;
+
+      // When turning right (turnStepDir < 0): step 0 = Right, step 1 = Left
+      // When turning left (turnStepDir > 0): step 0 = Left, step 1 = Right
+      const isRightSwing = (this.turnStepDir < 0) ? (stepIdx % 2 === 0) : (stepIdx % 2 === 1);
+
+      if (isRightSwing) {
+        // Right foot is SWING foot (lifting, reaching into turn)
+        groundRY += footLift;
+        groundRYaw += swingYaw;
+        groundRPitch -= swingPitch;
+        groundRRoll -= swingRoll;
+
+        // Left foot is STANCE foot (firmly planted on floor)
+        groundLY = this.restLLegPos.y;
+        groundLYaw = 0;
+        groundLPitch = 0;
+        groundLRoll = 0.05;
+      } else {
+        // Left foot is SWING foot (lifting, reaching into turn)
+        groundLY += footLift;
+        groundLYaw += swingYaw;
+        groundLPitch -= swingPitch;
+        groundLRoll += swingRoll;
+
+        // Right foot is STANCE foot (firmly planted on floor)
+        groundRY = this.restRLegPos.y;
+        groundRYaw = 0;
+        groundRPitch = 0;
+        groundRRoll = -0.05;
+      }
+    }
+
     // 2. Idle stance weight shift
-    const idleWeight = 1.0 - this.moveWeight;
+    const idleWeight = (1.0 - this.moveWeight) * (this.isTurnStepping ? 0 : 1.0);
     const idleSway = Math.sin(this.totalTime * 1.5) * idleWeight;
     groundRPitch += idleSway * 0.025;
     groundLPitch -= idleSway * 0.025;
@@ -650,19 +787,24 @@ export class ActiveRagdollController {
     const lPitchTarget = THREE.MathUtils.lerp(groundLPitch, airLPitch, this.airborneBlend);
     const rRollTarget = THREE.MathUtils.lerp(groundRRoll, airRRoll, this.airborneBlend);
     const lRollTarget = THREE.MathUtils.lerp(groundLRoll, airLRoll, this.airborneBlend);
+    const rYawTarget = THREE.MathUtils.lerp(groundRYaw, 0, this.airborneBlend);
+    const lYawTarget = THREE.MathUtils.lerp(groundLYaw, 0, this.airborneBlend);
     const rYTarget = THREE.MathUtils.lerp(groundRY, airRY, this.airborneBlend);
     const lYTarget = THREE.MathUtils.lerp(groundLY, airLY, this.airborneBlend);
 
     const curRPitch = this.rLegPitchSpring.update(rPitchTarget, dt);
     const curRRoll = this.rLegRollSpring.update(rRollTarget, dt);
+    const curRYaw = this.rLegYawSpring.update(rYawTarget, dt);
+
     const curLPitch = this.lLegPitchSpring.update(lPitchTarget, dt);
     const curLRoll = this.lLegRollSpring.update(lRollTarget, dt);
+    const curLYaw = this.lLegYawSpring.update(lYawTarget, dt);
 
-    this.bones.rLeg.rotation.set(curRPitch, 0, curRRoll);
-    this.bones.rLeg.position.y = THREE.MathUtils.lerp(this.bones.rLeg.position.y, rYTarget, Math.min(1, 20 * dt));
+    this.bones.rLeg.rotation.set(curRPitch, curRYaw, curRRoll);
+    this.bones.rLeg.position.y = THREE.MathUtils.lerp(this.bones.rLeg.position.y, rYTarget, Math.min(1, 55 * dt));
 
-    this.bones.lLeg.rotation.set(curLPitch, 0, curLRoll);
-    this.bones.lLeg.position.y = THREE.MathUtils.lerp(this.bones.lLeg.position.y, lYTarget, Math.min(1, 20 * dt));
+    this.bones.lLeg.rotation.set(curLPitch, curLYaw, curLRoll);
+    this.bones.lLeg.position.y = THREE.MathUtils.lerp(this.bones.lLeg.position.y, lYTarget, Math.min(1, 55 * dt));
   }
 
   /**
@@ -691,6 +833,22 @@ export class ActiveRagdollController {
     const armWave = Math.sin(this.gaitPhase);
     freeRPitch += armWave * armSwingAmp * this.localVelFwd;
     freeLPitch -= armWave * armSwingAmp * this.localVelFwd;
+
+    // Natural arm counterbalance during turn-in-place
+    if (this.isTurnStepping) {
+      const localPhase = this.turnGaitPhase % Math.PI;
+      const stepIdx = Math.floor(this.turnGaitPhase / Math.PI);
+      const liftArc = Math.sin(localPhase);
+      const isRightSwing = (this.turnStepDir < 0) ? (stepIdx % 2 === 0) : (stepIdx % 2 === 1);
+      const armWaveStep = liftArc * 0.18;
+      if (isRightSwing) {
+        freeRPitch += armWaveStep;
+        freeLPitch -= armWaveStep;
+      } else {
+        freeRPitch -= armWaveStep;
+        freeLPitch += armWaveStep;
+      }
+    }
 
     // Centrifugal spread when turning (rotVelocityY is smoothly continuous)
     const centrifugalSpread = THREE.MathUtils.clamp(Math.abs(this.rotVelocityY) * 0.045, 0, 0.25);

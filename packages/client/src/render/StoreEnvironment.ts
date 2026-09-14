@@ -62,6 +62,7 @@ export class StoreEnvironment {
       roughnessMap: roughnessMap,
       roughness: 0.42,
       metalness: 0.03,
+      dithering: true,
     });
 
     const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -184,6 +185,7 @@ export class StoreEnvironment {
         transparent: true,
         opacity: 1.0,
         depthWrite: true,
+        dithering: true,
       });
 
       // Shader injection: рандомизация отражений по тайлам, стохастическое устранение повторов и органика
