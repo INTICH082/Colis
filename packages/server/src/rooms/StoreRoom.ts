@@ -98,11 +98,14 @@ export class StoreRoom {
       });
     }
 
-    // Spawn starter delivery boxes in the loading dock
+    // Spawn starter delivery boxes with new 3D models (cola_can, chipsi, egg_tray)
+    this.spawnBox('cola_can', { x: -1.5, y: 0.2, z: 4.5 });
+    this.spawnBox('chipsi', { x: 0, y: 0.2, z: 4.5 });
+    this.spawnBox('egg_tray', { x: 1.5, y: 0.2, z: 4.5 });
+
     this.spawnBox('cola_can', { x: -7.5, y: 0.2, z: 6.5 });
-    this.spawnBox('orange_soda', { x: -8.5, y: 0.2, z: 6.5 });
-    this.spawnBox('cereal_crunch', { x: -7.5, y: 0.2, z: 7.8 });
-    this.spawnBox('fresh_milk', { x: -8.5, y: 0.2, z: 7.8 });
+    this.spawnBox('chipsi', { x: -8.5, y: 0.2, z: 6.5 });
+    this.spawnBox('egg_tray', { x: -7.5, y: 0.2, z: 7.8 });
   }
 
   public spawnBox(productId: string, pos: Vector3D): BoxState {
@@ -470,111 +473,12 @@ export class StoreRoom {
     }
   }
 
-  private handlePickupBox(playerId: string, data: InteractBoxPickupPayload): void {
-    const entry = this.players.get(playerId);
-    if (!entry) return;
-
-    if (entry.state.heldBoxId) {
-      this.sendError(playerId, 'Вы уже держите коробку');
-      return;
-    }
-
-    const box = this.boxes.get(data.boxId);
-    if (!box) {
-      this.sendError(playerId, 'Коробка не найдена');
-      return;
-    }
-
-    if (box.isHeld) {
-      this.sendError(playerId, 'Эту коробку уже держит другой игрок');
-      return;
-    }
-
-    // If client supplied its current position, sync it within bounds
-    if (data.playerPosition) {
-      const halfW = STORE_LAYOUT.FLOOR_WIDTH / 2 - 0.4;
-      const halfD = STORE_LAYOUT.FLOOR_DEPTH / 2 - 0.4;
-      entry.state.position.x = Math.max(-halfW, Math.min(halfW, data.playerPosition.x));
-      entry.state.position.y = Math.max(0, data.playerPosition.y);
-      entry.state.position.z = Math.max(-halfD, data.playerPosition.z);
-      if (Math.abs(entry.state.position.x) > 3.8) {
-        entry.state.position.z = Math.min(halfD, entry.state.position.z);
-      } else {
-        entry.state.position.z = Math.min(13.8, entry.state.position.z);
-      }
-    }
-
-    const dist = distanceXZ(entry.state.position, box.position);
-    if (dist > 5.0) {
-      this.sendError(playerId, `Вы слишком далеко от коробки (${dist.toFixed(1)}м > 5м)`);
-      return;
-    }
-
-    // Success: attach to player
-    box.isHeld = true;
-    box.heldByPlayerId = playerId;
-    entry.state.heldBoxId = box.id;
-
-    this.broadcast({
-      op: ServerOpCode.BOX_STATE_CHANGED,
-      data: box,
-    });
+  private handlePickupBox(_playerId: string, _data: InteractBoxPickupPayload): void {
+    // Disabled temporarily
   }
 
-  private handleDropBox(playerId: string, data?: InteractBoxDropPayload): void {
-    const entry = this.players.get(playerId);
-    if (!entry || !entry.state.heldBoxId) return;
-
-    const box = this.boxes.get(entry.state.heldBoxId);
-    if (!box) return;
-
-    box.isHeld = false;
-    box.heldByPlayerId = null;
-    entry.state.heldBoxId = null;
-
-    const rotY = entry.state.rotationY;
-    const throwForce = data?.throwForce ?? 0;
-
-    if (throwForce <= 0.05) {
-      // Gentle drop on floor in front of player
-      const dropDist = 0.75;
-      box.position = {
-        x: entry.state.position.x - Math.sin(rotY) * dropDist,
-        y: 0.18,
-        z: entry.state.position.z - Math.cos(rotY) * dropDist,
-      };
-      this.flyingBoxes.delete(box.id);
-      this.broadcast({
-        op: ServerOpCode.BOX_STATE_CHANGED,
-        data: box,
-      });
-    } else {
-      // Active throw with physical trajectory
-      const startDist = 0.65;
-      box.position = {
-        x: entry.state.position.x - Math.sin(rotY) * startDist,
-        y: entry.state.position.y + 0.85,
-        z: entry.state.position.z - Math.cos(rotY) * startDist,
-      };
-
-      const speed = 3.5 + Math.min(throwForce, 1.0) * 11.5;
-      let vx = data?.throwVelocity?.x ?? (-Math.sin(rotY) * speed);
-      let vy = data?.throwVelocity?.y ?? (1.6 + throwForce * 3.6);
-      let vz = data?.throwVelocity?.z ?? (-Math.cos(rotY) * speed);
-
-      // Clamp velocities for safety
-      const maxSpd = 20;
-      vx = Math.max(-maxSpd, Math.min(maxSpd, vx));
-      vy = Math.max(-maxSpd, Math.min(maxSpd, vy));
-      vz = Math.max(-maxSpd, Math.min(maxSpd, vz));
-
-      this.flyingBoxes.set(box.id, { vx, vy, vz, throwerId: playerId, flightTime: 0 });
-
-      this.broadcast({
-        op: ServerOpCode.BOX_STATE_CHANGED,
-        data: box,
-      });
-    }
+  private handleDropBox(_playerId: string, _data?: InteractBoxDropPayload): void {
+    // Disabled temporarily
   }
 
   private handleOpenBox(playerId: string, targetBoxId?: string): void {
@@ -604,141 +508,12 @@ export class StoreRoom {
     });
   }
 
-  private handlePlaceProduct(playerId: string, data: InteractPlaceProductPayload): void {
-    const entry = this.players.get(playerId);
-    if (!entry || !entry.state.heldBoxId) {
-      this.sendError(playerId, 'Для раскладки товаров возьмите открытую коробку');
-      return;
-    }
-
-    const box = this.boxes.get(entry.state.heldBoxId);
-    if (!box) return;
-
-    if (!box.isOpen) {
-      this.sendError(playerId, 'Сначала откройте коробку (нажмите R или пробел)');
-      return;
-    }
-
-    if (box.remainingItems <= 0) {
-      this.sendError(playerId, 'В этой коробке больше нет товаров');
-      return;
-    }
-
-    const shelf = this.shelves.get(data.shelfId);
-    if (!shelf) return;
-
-    const slot = shelf.slots[data.slotIndex];
-    if (!slot) return;
-
-    // Check if slot accepts this product
-    if (slot.productId !== null && slot.productId !== box.productId && slot.count > 0) {
-      this.sendError(playerId, 'На этом слоте размещен другой товар');
-      return;
-    }
-
-    const prod = PRODUCTS[box.productId];
-    const maxSlotCapacity = (prod && prod.shelfCols && prod.shelfRows)
-      ? prod.shelfCols * prod.shelfRows
-      : (prod?.boxCapacity || SHELF_CONFIG.MAX_ITEMS_PER_SLOT);
-
-    slot.maxCount = maxSlotCapacity;
-
-    if (slot.count >= maxSlotCapacity) {
-      this.sendError(playerId, `Слот уже заполнен (макс. ${maxSlotCapacity} шт.)`);
-      return;
-    }
-
-    // If client supplied its current position, sync it within bounds
-    if (data.playerPosition) {
-      const halfW = STORE_LAYOUT.FLOOR_WIDTH / 2 - 0.4;
-      const halfD = STORE_LAYOUT.FLOOR_DEPTH / 2 - 0.4;
-      entry.state.position.x = Math.max(-halfW, Math.min(halfW, data.playerPosition.x));
-      entry.state.position.y = Math.max(0, data.playerPosition.y);
-      entry.state.position.z = Math.max(-halfD, Math.min(halfD, data.playerPosition.z));
-    }
-
-    // Check distance to shelf
-    const dist = distanceXZ(entry.state.position, shelf.position);
-    if (dist > 5.5) {
-      this.sendError(playerId, 'Подойдите ближе к стеллажу');
-      return;
-    }
-
-    // Place one item
-    box.remainingItems -= 1;
-    slot.productId = box.productId;
-    slot.count += 1;
-
-    // If box is empty, drop/remove or mark empty
-    if (box.remainingItems === 0) {
-      this.broadcast({
-        op: ServerOpCode.NOTIFICATION,
-        data: {
-          type: 'success',
-          message: `Коробка пуста! Товар "${PRODUCTS[box.productId]?.name}" разложен на полку.`,
-        },
-      });
-    }
-
-    this.broadcast({
-      op: ServerOpCode.SHELF_STATE_CHANGED,
-      data: shelf,
-    });
-
-    this.broadcast({
-      op: ServerOpCode.BOX_STATE_CHANGED,
-      data: box,
-    });
+  private handlePlaceProduct(_playerId: string, _data: InteractPlaceProductPayload): void {
+    // Disabled temporarily
   }
 
-  private handleTakeProduct(playerId: string, data: InteractTakeProductPayload): void {
-    const entry = this.players.get(playerId);
-    if (!entry || !entry.state.heldBoxId) return;
-
-    const box = this.boxes.get(entry.state.heldBoxId);
-    if (!box || !box.isOpen) return;
-
-    const shelf = this.shelves.get(data.shelfId);
-    if (!shelf) return;
-
-    // If client supplied its current position, sync it within bounds
-    if (data.playerPosition) {
-      const halfW = STORE_LAYOUT.FLOOR_WIDTH / 2 - 0.4;
-      const halfD = STORE_LAYOUT.FLOOR_DEPTH / 2 - 0.4;
-      entry.state.position.x = Math.max(-halfW, Math.min(halfW, data.playerPosition.x));
-      entry.state.position.y = Math.max(0, data.playerPosition.y);
-      entry.state.position.z = Math.max(-halfD, Math.min(halfD, data.playerPosition.z));
-    }
-
-    const dist = distanceXZ(entry.state.position, shelf.position);
-    if (dist > 5.5) {
-      this.sendError(playerId, 'Подойдите ближе к стеллажу');
-      return;
-    }
-
-    const slot = shelf.slots[data.slotIndex];
-    if (!slot || slot.count <= 0 || slot.productId !== box.productId) return;
-
-    if (box.remainingItems >= box.maxItems) {
-      this.sendError(playerId, 'Коробка уже полная');
-      return;
-    }
-
-    slot.count -= 1;
-    if (slot.count === 0) {
-      slot.productId = null;
-    }
-    box.remainingItems += 1;
-
-    this.broadcast({
-      op: ServerOpCode.SHELF_STATE_CHANGED,
-      data: shelf,
-    });
-
-    this.broadcast({
-      op: ServerOpCode.BOX_STATE_CHANGED,
-      data: box,
-    });
+  private handleTakeProduct(_playerId: string, _data: InteractTakeProductPayload): void {
+    // Disabled temporarily
   }
 
   private handleOrderDelivery(playerId: string, data: OrderDeliveryPayload): void {

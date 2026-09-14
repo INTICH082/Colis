@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SHELF_CONFIG, STORE_LAYOUT, ShelfState } from '@colis/shared';
 
 export interface SlotMeshInfo {
@@ -11,6 +13,45 @@ export class StoreEnvironment {
   private scene: THREE.Scene;
   public slotHitboxes: SlotMeshInfo[] = [];
   public shelfMeshes: Map<string, THREE.Group> = new Map();
+
+  private static stelajAsset: THREE.Group | null = null;
+  private static loadPromise: Promise<void> | null = null;
+
+  public static async loadAssets(): Promise<void> {
+    if (this.stelajAsset) return;
+    if (this.loadPromise) return this.loadPromise;
+
+    this.loadPromise = new Promise<void>((resolve, reject) => {
+      const loader = new GLTFLoader();
+      loader.load(
+        `/models/furniture/stelaj.glb?v=${Date.now()}`,
+        (gltf) => {
+          gltf.scene.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+              const mesh = child as THREE.Mesh;
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              if (mat && mat.map) {
+                mat.map.magFilter = THREE.NearestFilter;
+                mat.map.minFilter = THREE.NearestMipmapLinearFilter;
+                mat.map.needsUpdate = true;
+              }
+            }
+          });
+          StoreEnvironment.stelajAsset = gltf.scene;
+          resolve();
+        },
+        undefined,
+        (err) => {
+          console.error('[StoreEnvironment] Failed to load stelaj model:', err);
+          reject(err);
+        }
+      );
+    });
+
+    return this.loadPromise;
+  }
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -412,61 +453,34 @@ export class StoreEnvironment {
     group.position.set(shelf.position.x, shelf.position.y, shelf.position.z);
     group.rotation.y = shelf.rotationY;
 
-    const metalMat = new THREE.MeshStandardMaterial({
-      color: 0x475569,
-      metalness: 0.8,
-      roughness: 0.3,
-    });
+    if (StoreEnvironment.stelajAsset) {
+      const shelfModel = SkeletonUtils.clone(StoreEnvironment.stelajAsset);
+      // Rotate by Math.PI around Y so front faces +Z
+      shelfModel.rotation.y = Math.PI;
+      // Scale to fit SHELF_CONFIG (width 2.2, height 2.14, depth 0.65)
+      shelfModel.scale.set(1.18, 0.56, 0.62);
+      shelfModel.position.set(0, 0, 0.05);
 
-    const plateMat = new THREE.MeshStandardMaterial({
-      color: 0x94a3b8,
-      metalness: 0.5,
-      roughness: 0.4,
-    });
-
-    const railMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      metalness: 0.2,
-      roughness: 0.5,
-    });
-
-    // 1. Back panel
-    const backGeo = new THREE.BoxGeometry(SHELF_CONFIG.WIDTH, SHELF_CONFIG.HEIGHT, 0.04);
-    const back = new THREE.Mesh(backGeo, metalMat);
-    back.position.set(0, SHELF_CONFIG.HEIGHT / 2, -SHELF_CONFIG.DEPTH / 2 + 0.02);
-    back.castShadow = true;
-    back.receiveShadow = true;
-    group.add(back);
-
-    // 2. Upright vertical side pillars
-    const pillarGeo = new THREE.BoxGeometry(0.06, SHELF_CONFIG.HEIGHT, SHELF_CONFIG.DEPTH);
-    const leftPillar = new THREE.Mesh(pillarGeo, metalMat);
-    leftPillar.position.set(-SHELF_CONFIG.WIDTH / 2 + 0.03, SHELF_CONFIG.HEIGHT / 2, 0);
-    leftPillar.castShadow = true;
-    group.add(leftPillar);
-
-    const rightPillar = new THREE.Mesh(pillarGeo, metalMat);
-    rightPillar.position.set(SHELF_CONFIG.WIDTH / 2 - 0.03, SHELF_CONFIG.HEIGHT / 2, 0);
-    rightPillar.castShadow = true;
-    group.add(rightPillar);
-
-    // 3. Tiers (horizontal plates)
-    for (let t = 0; t < SHELF_CONFIG.TIERS; t++) {
-      const tierY = SHELF_CONFIG.TIER_Y_OFFSETS[t];
-
-      // Shelf plate
-      const tierPlateGeo = new THREE.BoxGeometry(SHELF_CONFIG.WIDTH - 0.06, 0.03, SHELF_CONFIG.DEPTH - 0.02);
-      const tierPlate = new THREE.Mesh(tierPlateGeo, plateMat);
-      tierPlate.position.set(0, tierY, 0);
-      tierPlate.castShadow = true;
-      tierPlate.receiveShadow = true;
-      group.add(tierPlate);
-
-      // Price rail along front
-      const railGeo = new THREE.BoxGeometry(SHELF_CONFIG.WIDTH - 0.06, 0.04, 0.02);
-      const rail = new THREE.Mesh(railGeo, railMat);
-      rail.position.set(0, tierY + 0.02, SHELF_CONFIG.DEPTH / 2 - 0.01);
-      group.add(rail);
+      shelfModel.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+        }
+      });
+      group.add(shelfModel);
+    } else {
+      const metalMat = new THREE.MeshStandardMaterial({
+        color: 0x475569,
+        metalness: 0.8,
+        roughness: 0.3,
+      });
+      const backGeo = new THREE.BoxGeometry(SHELF_CONFIG.WIDTH, SHELF_CONFIG.HEIGHT, 0.04);
+      const back = new THREE.Mesh(backGeo, metalMat);
+      back.position.set(0, SHELF_CONFIG.HEIGHT / 2, -SHELF_CONFIG.DEPTH / 2 + 0.02);
+      back.castShadow = true;
+      back.receiveShadow = true;
+      group.add(back);
     }
 
     // 4. Invisible Slot Hitboxes for Raycasting interactions

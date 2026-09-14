@@ -127,6 +127,14 @@ class ColisGame {
     await PlayerEntity.loadAssets().catch((err) => {
       console.warn('[ColisGame] Failed to preload character model:', err);
     });
+    console.log('[ColisGame] Loading 3D box and product models...');
+    await BoxEntityManager.loadAssets().catch((err) => {
+      console.warn('[ColisGame] Failed to preload box assets:', err);
+    });
+    console.log('[ColisGame] Loading 3D supermarket shelf models...');
+    await StoreEnvironment.loadAssets().catch((err) => {
+      console.warn('[ColisGame] Failed to preload shelf assets:', err);
+    });
 
     console.log('[ColisGame] Waiting for fonts to load...');
     if (document.fonts) {
@@ -256,94 +264,52 @@ class ColisGame {
   }
 
   private handleActionE(): void {
-    // If holding box, gentle drop
-    if (this.localPlayerState.heldBoxId) {
-      this.network.sendDropBox({ throwForce: 0 });
-      return;
-    }
-
-    // If looking at a box nearby, pick it up
     if (this.hoveredBox) {
-      this.network.sendPickupBox(this.hoveredBox.boxId, this.localPlayerState.position);
+      const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
+      if (box && !box.isOpen) {
+        this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
+        this.boxManager.openBoxLocal(this.hoveredBox.boxId);
+      }
     }
   }
 
   private handleActionOpenBox(): void {
-    if (this.localPlayerState.heldBoxId) {
-      this.network.sendOpenBox(undefined, this.localPlayerState.position);
-    } else if (this.hoveredBox) {
-      this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
+    if (this.hoveredBox) {
+      const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
+      if (box && !box.isOpen) {
+        this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
+        this.boxManager.openBoxLocal(this.hoveredBox.boxId);
+      }
     }
   }
 
   private updateThrowCharging(): void {
-    if (!this.isChargingThrow) return;
-
-    if (!this.localPlayerState.heldBoxId || this.localPlayerEntity?.isKnockedDown()) {
+    // Disabled temporarily
+    if (this.isChargingThrow) {
       this.isChargingThrow = false;
       this.ui.setThrowCharge(null);
-      return;
-    }
-
-    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
-    if (elapsedSec < 0.2) {
-      this.ui.setThrowCharge(0);
-    } else {
-      const ratio = THREE.MathUtils.clamp((elapsedSec - 0.2) / 1.0, 0, 1);
-      this.ui.setThrowCharge(ratio);
     }
   }
 
   private finishThrowCharge(): void {
-    if (!this.isChargingThrow) return;
+    // Disabled temporarily
     this.isChargingThrow = false;
     this.ui.setThrowCharge(null);
-
-    if (!this.localPlayerState.heldBoxId) return;
-
-    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
-    // Quick tap (< 0.2s): gentle placement on floor right in front
-    if (elapsedSec < 0.2) {
-      this.network.sendDropBox({ throwForce: 0 });
-      return;
-    }
-
-    // Charged throw: 0.2s to 1.2s maps to force 0.1 .. 1.0
-    const forceRatio = THREE.MathUtils.clamp((elapsedSec - 0.2) / 1.0, 0.1, 1.0);
-    const rotY = this.localPlayerState.rotationY;
-    const horizSpeed = 3.5 + forceRatio * 11.5; // 3.5m/s to 15.0m/s
-    const vx = -Math.sin(rotY) * horizSpeed;
-    const vz = -Math.cos(rotY) * horizSpeed;
-    const vy = 1.6 + forceRatio * 3.6;
-
-    this.network.sendDropBox({
-      throwForce: forceRatio,
-      throwVelocity: { x: vx, y: vy, z: vz },
-    });
   }
 
   private handleLeftClick(): void {
-    if (!this.localPlayerState.heldBoxId) return;
-
-    if (this.hoveredSlot) {
-      this.network.sendPlaceProduct(
-        this.hoveredSlot.shelfId,
-        this.hoveredSlot.slotIndex,
-        this.localPlayerState.position
-      );
+    // Clicking a closed box opens it once
+    if (this.hoveredBox) {
+      const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
+      if (box && !box.isOpen) {
+        this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
+        this.boxManager.openBoxLocal(this.hoveredBox.boxId);
+      }
     }
   }
 
   private handleRightClick(): void {
-    if (!this.localPlayerState.heldBoxId) return;
-
-    if (this.hoveredSlot) {
-      this.network.sendTakeProduct(
-        this.hoveredSlot.shelfId,
-        this.hoveredSlot.slotIndex,
-        this.localPlayerState.position
-      );
-    }
+    // Disabled temporarily
   }
 
   private handleRoomInit = (data: InitRoomPayload): void => {
@@ -712,25 +678,8 @@ class ColisGame {
             };
             (this.hoveredSlot.mesh.material as THREE.MeshBasicMaterial).opacity = 0.35;
 
-            // Formulate prompt
-            if (this.localPlayerState.heldBoxId && this.currentRoom) {
-              const heldBox = this.currentRoom.boxes[this.localPlayerState.heldBoxId];
-              const prod = heldBox ? PRODUCTS[heldBox.productId] : null;
-
-              if (heldBox && !heldBox.isOpen) {
-                this.ui.setInteractionPrompt('Сначала откройте коробку (нажмите R)', 'R');
-              } else if (slot.productId && slot.productId !== heldBox?.productId && slot.count > 0) {
-                this.ui.setInteractionPrompt(`Слот занят другим товаром (${PRODUCTS[slot.productId]?.name})`, '!');
-              } else if (slot.count >= slot.maxCount) {
-                this.ui.setInteractionPrompt(`Слот полон (макс. ${slot.maxCount} шт.)`, '!');
-              } else {
-                this.ui.setInteractionPrompt(
-                  `[ЛКМ] Выставить ${prod?.name || 'товар'} (Слот ${slot.index + 1}: ${slot.count}/${slot.maxCount})`,
-                  'ЛКМ'
-                );
-              }
-              return;
-            } else if (slot.count > 0) {
+            // Show info only if shelf slot contains items
+            if (slot.count > 0) {
               const prod = PRODUCTS[slot.productId || ''];
               this.ui.setInteractionPrompt(
                 `Полка: ${prod?.name || 'Товар'} (${slot.count} шт.)`,
@@ -754,27 +703,27 @@ class ColisGame {
 
       if (box && !box.isHeld) {
         const distToBox = distanceXZ(this.localPlayerState.position, box.position);
-        if (distToBox <= 3.5) {
+        if (distToBox <= 3.8) {
           this.hoveredBox = {
             boxId,
             mesh: hit.object as THREE.Mesh,
           };
 
           const prod = PRODUCTS[box.productId];
-          if (!this.localPlayerState.heldBoxId) {
-            if (!box.isOpen) {
-              this.ui.setInteractionPrompt(
-                `[E] Взять | [R] Открыть: "${prod?.name || box.productId}" (${box.remainingItems}/${box.maxItems})`,
-                'E'
-              );
-            } else {
-              this.ui.setInteractionPrompt(
-                `[E] Взять коробку: "${prod?.name || box.productId}" (${box.remainingItems}/${box.maxItems})`,
-                'E'
-              );
-            }
-            return;
+          const prodName = prod?.name || box.productId;
+
+          if (!box.isOpen) {
+            this.ui.setInteractionPrompt(
+              `[Клик / E] Открыть коробку: "${prodName}"`,
+              'E'
+            );
+          } else {
+            this.ui.setInteractionPrompt(
+              `"${prodName}" (Коробка открыта)`,
+              '✓'
+            );
           }
+          return;
         }
       }
     }

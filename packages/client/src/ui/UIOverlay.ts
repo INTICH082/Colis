@@ -95,7 +95,7 @@ export class UIOverlay {
 
       card.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px;">
-          <div style="width: 14px; height: 14px; border-radius: 3px; background: ${prod.color};"></div>
+          ${prod.iconUrl ? `<img src="${prod.iconUrl}" style="width: 28px; height: 28px; object-fit: contain; image-rendering: pixelated; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3);" />` : `<div style="width: 16px; height: 16px; border-radius: 3px; background: ${prod.color};"></div>`}
           <span class="product-card-title">${prod.name}</span>
         </div>
         <div class="product-card-details">

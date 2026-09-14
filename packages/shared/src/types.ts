@@ -20,6 +20,8 @@ export interface ProductDefinition {
   unitWeight: number; // in kg
   color: string;
   secondaryColor?: string;
+  iconUrl?: string;
+  modelPath?: string;
   modelType: 'can' | 'box_tall' | 'box_wide' | 'carton' | 'bottle';
   dimensions: {
     width: number;
