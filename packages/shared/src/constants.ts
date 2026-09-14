@@ -291,3 +291,23 @@ export const MONSTER_CONFIG = {
     color: '#ea580c',
   },
 } as const;
+
+export const BREAKER_CONFIG = {
+  position: { x: -8.0, y: 1.5, z: -9.8 },
+  INTERACTION_RADIUS: 2.4,
+  REPAIR_TIME_SECONDS: 4.5,
+} as const;
+
+export const EVENT_CONFIG = {
+  EVENT_CHANCE_DAY: 0.70, // 70% chance of day event
+  EVENT_CHANCE_NIGHT: 0.75, // 75% chance of night event
+  RUSH_HOUR_DURATION: 40,
+  SAN_INSPECTION_DURATION: 45,
+  SAN_INSPECTION_BONUS: 200,
+  SAN_INSPECTION_FINE: 150,
+  SHOPLIFTER_REWARD_STORE: 30,
+  SHOPLIFTER_REWARD_PERSONAL: 15,
+  BLOOD_MOON_DURATION: 55,
+  BLACKOUT_DURATION: 50,
+  BLACKOUT_REPAIR_REWARD: 50,
+} as const;

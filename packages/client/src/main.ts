@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import {
+  BREAKER_CONFIG,
   BoxState,
+  GameEventEndedPayload,
+  GameEventState,
+  GameEventTriggeredPayload,
   InitRoomPayload,
   PRODUCTS,
   PlayerState,
@@ -25,6 +29,7 @@ import { CleanerBotEntity } from './entities/CleanerBotEntity.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIOverlay } from './ui/UIOverlay.js';
+import { SoundEffects } from './audio/SoundEffects.js';
 
 class ColisGame {
   private canvas: HTMLCanvasElement;
@@ -40,6 +45,14 @@ class ColisGame {
   private cleanerBot: CleanerBotEntity;
   private ui: UIOverlay;
   private network: NetworkClient;
+
+  // Flashlight for Blackout event
+  private flashlight: THREE.SpotLight;
+  private flashlightTarget: THREE.Object3D;
+
+  // Active dynamic game event
+  private currentEvent: GameEventState | null = null;
+  private isRepairingBreaker: boolean = false;
 
   private localPlayerId: string = '';
   private localPlayerState: PlayerState = {
@@ -91,6 +104,14 @@ class ColisGame {
     this.physics = new PhysicsWorld();
     this.ui = new UIOverlay();
 
+    // Setup player flashlight for blackout event
+    this.flashlight = new THREE.SpotLight(0xffeedd, 3.5, 20, Math.PI / 5, 0.45, 1.2);
+    this.flashlight.visible = false;
+    this.renderer.scene.add(this.flashlight);
+    this.flashlightTarget = new THREE.Object3D();
+    this.renderer.scene.add(this.flashlightTarget);
+    this.flashlight.target = this.flashlightTarget;
+
     const host = window.location.hostname || 'localhost';
     const serverUrl = `ws://${host}:8080`;
 
@@ -119,6 +140,45 @@ class ColisGame {
               : (data.attackerId === 'box' ? 'Игрока оглушило прилетевшей коробкой!' : 'Игрока сбили с ног!'),
           });
         }
+      },
+      onGameEventTriggered: (data: GameEventTriggeredPayload) => {
+        this.currentEvent = data.event;
+        SoundEffects.playEventStart(data.event.type);
+        if (data.event.type === 'blood_moon') {
+          this.atmosphere.setBloodMoon(true);
+        } else if (data.event.type === 'blackout') {
+          this.atmosphere.setBlackout(true);
+          this.flashlight.visible = true;
+        }
+        this.ui.updateEvent(data.event);
+        this.ui.showNotification({
+          type: 'warning',
+          message: `Событие: ${data.event.title}!`,
+        });
+      },
+      onGameEventEnded: (data: GameEventEndedPayload) => {
+        if (data.success) {
+          SoundEffects.playEventSuccess();
+        } else {
+          SoundEffects.playEventFail();
+        }
+        if (data.eventType === 'blood_moon') {
+          this.atmosphere.setBloodMoon(false);
+        } else if (data.eventType === 'blackout') {
+          this.atmosphere.setBlackout(false);
+          this.flashlight.visible = false;
+        }
+        this.currentEvent = null;
+        this.ui.updateEvent(null);
+        this.ui.updateBreakerUI(false, 0);
+        if (this.isRepairingBreaker) {
+          this.isRepairingBreaker = false;
+          this.network.sendInteractBreaker(false);
+        }
+        this.ui.showNotification({
+          type: data.success ? 'success' : 'info',
+          message: data.rewardSummary,
+        });
       },
       onConnectionStatus: (connected) => {
         if (!connected) {
@@ -284,6 +344,13 @@ class ColisGame {
   private handleActionE(): void {
     if (this.localPlayerEntity?.isKnockedDown()) return;
 
+    // If near breaker during blackout -> reserve E for breaker repair
+    const isBlackout = this.currentEvent?.type === 'blackout';
+    const distToBreaker = distanceXZ(this.localPlayerState.position, BREAKER_CONFIG.position);
+    if (isBlackout && distToBreaker <= BREAKER_CONFIG.INTERACTION_RADIUS) {
+      return;
+    }
+
     // If already holding box -> gentle drop on floor
     if (this.localPlayerState.heldBoxId) {
       this.network.sendDropBox({ throwForce: 0 });
@@ -441,6 +508,17 @@ class ColisGame {
       this.currentShift = data.room.shift;
       this.ui.updateShift(this.currentShift);
       this.updateAtmosphereShift(this.currentShift);
+
+      if (this.currentShift.activeEvent) {
+        this.currentEvent = this.currentShift.activeEvent;
+        this.ui.updateEvent(this.currentEvent);
+        if (this.currentEvent.type === 'blood_moon') {
+          this.atmosphere.setBloodMoon(true);
+        } else if (this.currentEvent.type === 'blackout') {
+          this.atmosphere.setBlackout(true);
+          this.flashlight.visible = true;
+        }
+      }
     }
 
     this.teamUnlocks = data.room.teamUnlocks || [];
@@ -520,6 +598,33 @@ class ColisGame {
       this.ui.updateShift(this.currentShift);
     }
 
+    // 4. Dynamic Event Sync
+    if (tick.activeEvent) {
+      this.currentEvent = tick.activeEvent;
+      this.ui.updateEvent(tick.activeEvent);
+      if (tick.activeEvent.type === 'blood_moon') {
+        this.atmosphere.setBloodMoon(true);
+      } else if (tick.activeEvent.type === 'blackout') {
+        this.atmosphere.setBlackout(true);
+        this.flashlight.visible = true;
+      }
+    } else if (this.currentEvent) {
+      // Event concluded on server
+      if (this.currentEvent.type === 'blood_moon') {
+        this.atmosphere.setBloodMoon(false);
+      } else if (this.currentEvent.type === 'blackout') {
+        this.atmosphere.setBlackout(false);
+        this.flashlight.visible = false;
+      }
+      this.currentEvent = null;
+      this.ui.updateEvent(null);
+      this.ui.updateBreakerUI(false, 0);
+      if (this.isRepairingBreaker) {
+        this.isRepairingBreaker = false;
+        this.network.sendInteractBreaker(false);
+      }
+    }
+
     this.updateHeldBoxUI();
   };
 
@@ -527,6 +632,17 @@ class ColisGame {
     this.currentShift = shift;
     this.ui.updateShift(shift);
     this.updateAtmosphereShift(shift);
+    // Reset event atmosphere on phase shift
+    this.atmosphere.setBloodMoon(false);
+    this.atmosphere.setBlackout(false);
+    this.flashlight.visible = false;
+    this.currentEvent = null;
+    this.ui.updateEvent(null);
+    this.ui.updateBreakerUI(false, 0);
+    if (this.isRepairingBreaker) {
+      this.isRepairingBreaker = false;
+      this.network.sendInteractBreaker(false);
+    }
   };
 
   private updateAtmosphereShift(shift: ShiftState): void {
@@ -640,6 +756,41 @@ class ColisGame {
 
     // Update dynamic sky & ocean
     this.atmosphere.update(dt, this.renderer.camera.position, this.renderer.currentCameraTarget);
+
+    // Breaker interaction & Blackout electrical logic
+    const isBlackout = this.currentEvent?.type === 'blackout';
+    const distToBreaker = distanceXZ(this.localPlayerState.position, BREAKER_CONFIG.position);
+    const isNearBreaker = distToBreaker <= BREAKER_CONFIG.INTERACTION_RADIUS;
+    const breakerProgress = this.currentEvent?.progress ?? 0;
+
+    if (isBlackout && isNearBreaker) {
+      this.ui.updateBreakerUI(true, breakerProgress);
+      const wantsRepair = !!this.keys['KeyE'] && !this.localPlayerEntity?.isKnockedDown();
+      if (wantsRepair !== this.isRepairingBreaker) {
+        this.isRepairingBreaker = wantsRepair;
+        this.network.sendInteractBreaker(wantsRepair);
+      }
+    } else {
+      this.ui.updateBreakerUI(false, 0);
+      if (this.isRepairingBreaker) {
+        this.isRepairingBreaker = false;
+        this.network.sendInteractBreaker(false);
+      }
+    }
+
+    this.environment.updateBreaker(isBlackout, breakerProgress, dt);
+
+    // Player Flashlight during Blackout
+    if (this.flashlight.visible && this.localPlayerEntity) {
+      const p = this.localPlayerState.position;
+      this.flashlight.position.set(p.x, p.y + 1.2, p.z);
+      const rotY = this.localPlayerState.rotationY;
+      this.flashlightTarget.position.set(
+        p.x - Math.sin(rotY) * 6,
+        p.y + 0.6,
+        p.z - Math.cos(rotY) * 6
+      );
+    }
 
     // Render Scene
     this.renderer.render();
@@ -811,6 +962,14 @@ class ColisGame {
   // RAYCASTING & INTERACTION PROMPTS
   // ==========================================
   private updateRaycasting(): void {
+    // 0. Breaker interaction prompt during blackout
+    const isBlackout = this.currentEvent?.type === 'blackout';
+    const distToBreaker = distanceXZ(this.localPlayerState.position, BREAKER_CONFIG.position);
+    if (isBlackout && distToBreaker <= BREAKER_CONFIG.INTERACTION_RADIUS) {
+      this.ui.setInteractionPrompt('Удерживайте [E] для починки электрощитка', 'E');
+      return;
+    }
+
     this.renderer.raycaster.setFromCamera(this.renderer.mousePos, this.renderer.camera);
 
     // 1. Raycast Shelf Slots

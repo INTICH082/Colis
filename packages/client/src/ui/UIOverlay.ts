@@ -1,4 +1,5 @@
 import {
+  GameEventState,
   NotificationPayload,
   PERSONAL_SKILLS,
   PRODUCTS,
@@ -30,6 +31,19 @@ export class UIOverlay {
   private elStaminaCard: HTMLElement;
   private elStaminaPct: HTMLElement;
   private elStaminaFill: HTMLElement;
+
+  // Dynamic Event Banner
+  private elEventBanner: HTMLElement;
+  private elEventTitle: HTMLElement;
+  private elEventTimer: HTMLElement;
+  private elEventDesc: HTMLElement;
+  private elEventFill: HTMLElement;
+  private elEventIcon: HTMLElement;
+
+  // Breaker Repair Card
+  private elBreakerCard: HTMLElement;
+  private elBreakerPct: HTMLElement;
+  private elBreakerFill: HTMLElement;
 
   // Upgrades & Skills Modal
   private elUpgradesModal: HTMLElement;
@@ -80,6 +94,19 @@ export class UIOverlay {
     this.elStaminaCard = document.getElementById('stamina-card')!;
     this.elStaminaPct = document.getElementById('stamina-pct')!;
     this.elStaminaFill = document.getElementById('stamina-fill')!;
+
+    // Dynamic Event Banner
+    this.elEventBanner = document.getElementById('event-banner')!;
+    this.elEventTitle = document.getElementById('event-title')!;
+    this.elEventTimer = document.getElementById('event-timer')!;
+    this.elEventDesc = document.getElementById('event-desc')!;
+    this.elEventFill = document.getElementById('event-bar-fill')!;
+    this.elEventIcon = document.getElementById('event-icon')!;
+
+    // Breaker Card
+    this.elBreakerCard = document.getElementById('breaker-repair-card')!;
+    this.elBreakerPct = document.getElementById('breaker-pct')!;
+    this.elBreakerFill = document.querySelector('#breaker-repair-card .breaker-bar-fill') as HTMLElement;
 
     // Upgrades
     this.elUpgradesModal = document.getElementById('upgrades-modal')!;
@@ -429,5 +456,44 @@ export class UIOverlay {
     } else {
       this.elStaminaFill.classList.remove('depleted');
     }
+  }
+
+  public updateEvent(event: GameEventState | null | undefined): void {
+    if (!event || event.type === 'none') {
+      this.elEventBanner.style.display = 'none';
+      return;
+    }
+
+    this.elEventBanner.style.display = 'block';
+    this.elEventIcon.textContent = event.icon || '⚠️';
+    this.elEventTitle.textContent = event.title;
+
+    let desc = event.description;
+    if (event.type === 'sanitary_inspection' && event.currentCount !== undefined) {
+      desc = `Уберите пустые коробки с пола! На полу сейчас: ${event.currentCount} шт.`;
+    } else if (event.type === 'blackout' && event.progress !== undefined) {
+      desc = `Свет отключен! Прогресс починки щитка: ${event.progress}%`;
+    }
+    this.elEventDesc.textContent = desc;
+
+    const seconds = Math.max(0, Math.ceil(event.durationRemaining));
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    this.elEventTimer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    const fillRatio = Math.max(0, Math.min(1, event.durationRemaining / (event.totalDuration || 1)));
+    this.elEventFill.style.width = `${fillRatio * 100}%`;
+  }
+
+  public updateBreakerUI(isNear: boolean, progress: number): void {
+    if (!isNear) {
+      this.elBreakerCard.style.display = 'none';
+      return;
+    }
+
+    this.elBreakerCard.style.display = 'flex';
+    const pct = Math.min(100, Math.max(0, Math.round(progress)));
+    this.elBreakerPct.textContent = `${pct}%`;
+    this.elBreakerFill.style.width = `${pct}%`;
   }
 }

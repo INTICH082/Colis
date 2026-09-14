@@ -27,6 +27,9 @@ export class CustomerEntityManager {
     rotationY: number;
     state: string;
     heldProductId: string | null;
+    isShoplifter?: boolean;
+    isKnockedOut?: boolean;
+    stolenItemName?: string;
   }> | undefined): void {
     if (!serverCustomers) {
       for (const entry of this.customers.values()) {
@@ -43,7 +46,7 @@ export class CustomerEntityManager {
 
       let entry = this.customers.get(id);
       if (!entry) {
-        entry = this.buildCustomerMesh(id);
+        entry = this.buildCustomerMesh(id, !!data.isShoplifter);
         this.customers.set(id, entry);
         this.scene.add(entry.group);
         entry.group.position.set(data.position.x, data.position.y, data.position.z);
@@ -53,12 +56,19 @@ export class CustomerEntityManager {
       entry.targetPos.set(data.position.x, data.position.y, data.position.z);
       entry.targetRotY = data.rotationY;
 
+      if (data.isKnockedOut) {
+        entry.group.rotation.x = -Math.PI / 2;
+        entry.group.position.y = 0.15;
+      } else {
+        entry.group.rotation.x = 0;
+      }
+
       if (entry.currentProductId !== data.heldProductId) {
         entry.currentProductId = data.heldProductId;
         this.updateHeldProduct(entry, data.heldProductId);
       }
 
-      this.updateNameTag(entry, data.state);
+      this.updateNameTag(entry, data.state, !!data.isShoplifter, !!data.isKnockedOut);
     }
 
     for (const [id, entry] of this.customers) {
@@ -94,11 +104,11 @@ export class CustomerEntityManager {
     }
   }
 
-  private buildCustomerMesh(id: string): CustomerRenderEntry {
+  private buildCustomerMesh(id: string, isShoplifter: boolean = false): CustomerRenderEntry {
     const group = new THREE.Group();
 
     const shirtColors = [0x10b981, 0x06b6d4, 0xf59e0b, 0xec4899, 0x8b5cf6, 0x3b82f6];
-    const shirtColor = shirtColors[Math.abs(id.split('').reduce((a, b) => a + b.charCodeAt(0), 0)) % shirtColors.length];
+    const shirtColor = isShoplifter ? 0x111827 : shirtColors[Math.abs(id.split('').reduce((a, b) => a + b.charCodeAt(0), 0)) % shirtColors.length];
 
     const torsoGeo = new THREE.BoxGeometry(0.42, 0.54, 0.26);
     const torsoMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.6 });
@@ -116,7 +126,7 @@ export class CustomerEntityManager {
     group.add(head);
 
     const hairGeo = new THREE.BoxGeometry(0.30, 0.12, 0.30);
-    const hairMat = new THREE.MeshStandardMaterial({ color: 0x3d2314, roughness: 0.9 });
+    const hairMat = new THREE.MeshStandardMaterial({ color: isShoplifter ? 0x0f172a : 0x3d2314, roughness: 0.9 });
     const hair = new THREE.Mesh(hairGeo, hairMat);
     hair.position.y = 1.38;
     group.add(hair);
@@ -137,14 +147,14 @@ export class CustomerEntityManager {
     const basketMesh = new THREE.Group();
     const basketBox = new THREE.Mesh(
       new THREE.BoxGeometry(0.32, 0.22, 0.24),
-      new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: isShoplifter ? 0x1e293b : 0xd97706, roughness: 0.4 })
     );
     basketBox.castShadow = true;
     basketMesh.add(basketBox);
     basketMesh.position.set(0, 0.72, -0.32);
     group.add(basketMesh);
 
-    const nameSprite = this.createCustomerSprite('Покупатель');
+    const nameSprite = this.createCustomerSprite(isShoplifter ? '🚨 ВОР' : 'Покупатель');
     nameSprite.position.set(0, 1.75, 0);
     group.add(nameSprite);
 
@@ -178,17 +188,29 @@ export class CustomerEntityManager {
     const itemMesh = new THREE.Mesh(itemGeo, itemMat);
     itemMesh.position.set(0, 0.12, 0);
     itemMesh.castShadow = true;
-
     entry.basketMesh.add(itemMesh);
     entry.heldItemMesh = itemMesh;
   }
 
-  private updateNameTag(entry: CustomerRenderEntry, state: string): void {
+  private updateNameTag(entry: CustomerRenderEntry, state: string, isShoplifter: boolean = false, isKnockedOut: boolean = false): void {
     let icon = '🛒';
-    if (state === 'PAYING') icon = '💳 Оплата...';
-    else if (state === 'SAD_LEAVING') icon = '😞 Нет товара!';
-    else if (state === 'LEAVING') icon = '😊 Спасибо!';
-    else if (state === 'BROWSING') icon = '👀 Выбирает...';
+    let borderColor = '#10b981';
+
+    if (isShoplifter) {
+      borderColor = '#ef4444';
+      if (isKnockedOut) {
+        icon = '😵 ОГЛУШЕН!';
+      } else if (state === 'FLEEING') {
+        icon = '🚨 ВОР УБЕГАЕТ!';
+      } else {
+        icon = '🚨 ВОР В ЗАЛЕ!';
+      }
+    } else {
+      if (state === 'PAYING') icon = '💳 Оплата...';
+      else if (state === 'SAD_LEAVING') { icon = '😞 Нет товара!'; borderColor = '#ef4444'; }
+      else if (state === 'LEAVING') icon = '😊 Спасибо!';
+      else if (state === 'BROWSING') icon = '👀 Выбирает...';
+    }
 
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -198,7 +220,7 @@ export class CustomerEntityManager {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
     ctx.roundRect(8, 8, 240, 48, 10);
     ctx.fill();
-    ctx.strokeStyle = state === 'SAD_LEAVING' ? '#ef4444' : '#10b981';
+    ctx.strokeStyle = borderColor;
     ctx.lineWidth = 3;
     ctx.stroke();
 

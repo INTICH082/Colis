@@ -18,6 +18,8 @@ import {
   UpgradesChangedPayload,
   MonsterDefeatedPayload,
   ShiftSummaryPayload,
+  GameEventTriggeredPayload,
+  GameEventEndedPayload,
 } from '@colis/shared';
 
 export interface NetworkCallbacks {
@@ -35,6 +37,8 @@ export interface NetworkCallbacks {
   onUpgradesChanged?: (upgrades: UpgradesChangedPayload) => void;
   onMonsterDefeated?: (data: MonsterDefeatedPayload) => void;
   onShiftSummary?: (data: ShiftSummaryPayload) => void;
+  onGameEventTriggered?: (data: GameEventTriggeredPayload) => void;
+  onGameEventEnded?: (data: GameEventEndedPayload) => void;
 }
 
 export class NetworkClient {
@@ -166,7 +170,20 @@ export class NetworkClient {
       case ServerOpCode.SHIFT_SUMMARY:
         this.callbacks.onShiftSummary?.(msg.data);
         break;
+      case ServerOpCode.GAME_EVENT_TRIGGERED:
+        this.callbacks.onGameEventTriggered?.(msg.data);
+        break;
+      case ServerOpCode.GAME_EVENT_ENDED:
+        this.callbacks.onGameEventEnded?.(msg.data);
+        break;
     }
+  }
+
+  public sendInteractBreaker(isRepairing: boolean): void {
+    this.send({
+      op: ClientOpCode.INTERACT_BREAKER,
+      data: { isRepairing },
+    });
   }
 
   public sendBuyTeamUpgrade(upgradeId: string): void {

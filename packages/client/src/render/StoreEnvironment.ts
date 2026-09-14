@@ -141,6 +141,9 @@ export class StoreEnvironment {
 
     // 3. Walls
     this.buildWalls();
+
+    // 4. Electrical Breaker Panel
+    this.buildElectricalBreaker();
   }
 
   public wallMeshes: THREE.Mesh[] = [];
@@ -401,6 +404,78 @@ export class StoreEnvironment {
     frontWallRight.receiveShadow = true;
     this.scene.add(frontWallRight);
     this.wallMeshes.push(frontWallRight);
+  }
+
+  private breakerLedMaterial?: THREE.MeshBasicMaterial;
+  private breakerElapsed: number = 0;
+
+  private buildElectricalBreaker(): void {
+    const breakerGroup = new THREE.Group();
+    // Mounted on warehouse back wall (X = -8.0, Y = 1.6, Z = -9.8)
+    breakerGroup.position.set(-8.0, 1.6, -9.8);
+
+    // 1. Steel cabinet body
+    const cabinetMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.4,
+      metalness: 0.8,
+    });
+    const cabinet = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.95, 0.18), cabinetMat);
+    cabinet.castShadow = true;
+    cabinet.receiveShadow = true;
+    breakerGroup.add(cabinet);
+
+    // 2. Hazard warning door
+    const doorMat = new THREE.MeshStandardMaterial({
+      color: 0xeab308,
+      roughness: 0.5,
+      metalness: 0.2,
+    });
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.85, 0.02), doorMat);
+    door.position.z = 0.095;
+    breakerGroup.add(door);
+
+    // 3. Lightning bolt sign canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 76px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', 64, 64);
+
+    const signTex = new THREE.CanvasTexture(canvas);
+    const signMat = new THREE.MeshBasicMaterial({ map: signTex, transparent: true });
+    const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.35), signMat);
+    signMesh.position.z = 0.11;
+    breakerGroup.add(signMesh);
+
+    // 4. Status LED
+    this.breakerLedMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+    const ledMesh = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), this.breakerLedMaterial);
+    ledMesh.position.set(0, 0.35, 0.11);
+    breakerGroup.add(ledMesh);
+
+    this.scene.add(breakerGroup);
+  }
+
+  public updateBreaker(isBlackout: boolean, progress: number, dt: number): void {
+    if (!this.breakerLedMaterial) return;
+    this.breakerElapsed += dt;
+
+    if (isBlackout) {
+      if (progress >= 100) {
+        this.breakerLedMaterial.color.setHex(0x10b981); // Solid green when fixed
+      } else {
+        // Blinking amber/red emergency warning
+        const blink = Math.sin(this.breakerElapsed * 8.0) > 0;
+        this.breakerLedMaterial.color.setHex(blink ? 0xef4444 : 0xf59e0b);
+      }
+    } else {
+      this.breakerLedMaterial.color.setHex(0x10b981); // Normal green
+    }
   }
 
   /**

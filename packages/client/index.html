@@ -342,6 +342,123 @@
       background: linear-gradient(90deg, #ef4444, #f97316);
     }
 
+    /* Dynamic Event Banner */
+    .event-banner-container {
+      position: absolute;
+      top: 76px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      pointer-events: none;
+      animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .event-banner-card {
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(16px);
+      border: 2px solid #ef4444;
+      border-radius: 14px;
+      padding: 10px 22px;
+      min-width: 380px;
+      max-width: 520px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(239, 68, 68, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: auto;
+    }
+
+    .event-banner-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .event-banner-title {
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: 0.03em;
+      color: #fff;
+    }
+
+    .event-banner-timer {
+      font-family: 'Handgeschrieben', cursive, sans-serif;
+      font-weight: 800;
+      font-size: 1.15rem;
+      color: #facc15;
+    }
+
+    .event-banner-desc {
+      font-size: 0.8rem;
+      color: #cbd5e1;
+    }
+
+    .event-progress-bar-bg {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    .event-progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #f59e0b, #ef4444);
+      width: 100%;
+      transition: width 0.3s ease;
+    }
+
+    /* Breaker Repair Card */
+    .breaker-repair-card {
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(14px);
+      border: 1px solid #eab308;
+      border-radius: 12px;
+      padding: 12px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 280px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(234, 179, 8, 0.25);
+      animation: slideUp 0.15s ease-out;
+    }
+
+    .breaker-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      font-size: 0.85rem;
+      color: #fde047;
+    }
+
+    .breaker-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .breaker-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #eab308, #10b981);
+      width: 0%;
+      transition: width 0.1s linear;
+    }
+
+    .breaker-hint {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      text-align: center;
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translate(-50%, -16px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
     .controls-cheatsheet {
       background: rgba(15, 23, 42, 0.7);
       backdrop-filter: blur(8px);
@@ -548,6 +665,23 @@
     </div>
   </div>
 
+  <!-- Dynamic Event Alert Banner -->
+  <div class="event-banner-container" id="event-banner" style="display: none;">
+    <div class="event-banner-card" id="event-card">
+      <div class="event-banner-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="event-banner-icon" id="event-icon" style="font-size: 1.4rem;">🔥</span>
+          <span class="event-banner-title" id="event-title">ЧАС ПИК</span>
+        </div>
+        <span class="event-banner-timer" id="event-timer">00:40</span>
+      </div>
+      <div class="event-banner-desc" id="event-desc">Покупатели сметают товары (+50% к выручке)!</div>
+      <div class="event-progress-bar-bg" id="event-bar-bg">
+        <div class="event-progress-bar-fill" id="event-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Center Crosshair & Context Prompts -->
   <div class="crosshair-container" id="crosshair-box">
     <div class="crosshair-dot"></div>
@@ -598,6 +732,18 @@
       <div class="stamina-bar-bg">
         <div class="stamina-bar-fill" id="stamina-fill"></div>
       </div>
+    </div>
+
+    <!-- Breaker Repair Indicator -->
+    <div class="breaker-repair-card" id="breaker-repair-card" style="display: none;">
+      <div class="breaker-header">
+        <span>⚡ Починка электрощитка [E]</span>
+        <span id="breaker-pct">0%</span>
+      </div>
+      <div class="breaker-bar-bg">
+        <div class="breaker-bar-fill" id="breaker-fill"></div>
+      </div>
+      <div class="breaker-hint">Удерживайте [E] для восстановления питания!</div>
     </div>
 
     <div class="controls-cheatsheet">

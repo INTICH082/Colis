@@ -63,6 +63,18 @@ export class AtmosphereManager {
   private currentOceanDeep = new THREE.Color();
   private currentOceanShallow = new THREE.Color();
 
+  // Event Atmosphere Modes
+  public isBloodMoon: boolean = false;
+  public isBlackout: boolean = false;
+
+  public setBloodMoon(active: boolean): void {
+    this.isBloodMoon = active;
+  }
+
+  public setBlackout(active: boolean): void {
+    this.isBlackout = active;
+  }
+
   constructor(scene: THREE.Scene, dirLight?: THREE.DirectionalLight, ambientLight?: THREE.AmbientLight) {
     this.scene = scene;
     this.ambientLight = ambientLight;
@@ -803,8 +815,19 @@ export class AtmosphereManager {
     this.sunLight.target.updateMatrixWorld();
 
     // Position Moon Light toward snapped ground focus point
-    this.moonLight.color.copy(this.colMoon);
-    this.moonLight.intensity = moonIntensity;
+    if (this.isBloodMoon) {
+      this.moonLight.color.setHex(0xff1818);
+      this.moonLight.intensity = Math.max(0.7, moonIntensity * 1.8);
+    } else {
+      this.moonLight.color.copy(this.colMoon);
+      this.moonLight.intensity = moonIntensity;
+    }
+
+    if (this.isBlackout) {
+      this.sunLight.intensity = 0.02;
+      this.moonLight.intensity = 0.04;
+    }
+
     const moonY = Math.max(8.0, this.currentMoonDir.y * lightDist);
     this.moonLight.position.set(
       snappedFocusX + this.currentMoonDir.x * lightDist,
@@ -824,8 +847,20 @@ export class AtmosphereManager {
       if (sunsetWeight > 0.05) {
         curAmbient.lerp(sunsetAmbient, sunsetWeight * 0.65);
       }
-      this.ambientLight.color.copy(curAmbient);
-      this.ambientLight.intensity = 0.65 + 0.25 * dayWeight;
+
+      if (this.isBloodMoon) {
+        curAmbient.lerp(new THREE.Color(0x661010), 0.7);
+        this.ambientLight.color.copy(curAmbient);
+        this.ambientLight.intensity = 0.75;
+      } else if (this.isBlackout) {
+        // Emergency flickering dim red light
+        const redPulse = 0.07 + 0.05 * Math.sin(this.elapsedTime * 4.5);
+        this.ambientLight.color.setHex(0x991818);
+        this.ambientLight.intensity = redPulse;
+      } else {
+        this.ambientLight.color.copy(curAmbient);
+        this.ambientLight.intensity = 0.65 + 0.25 * dayWeight;
+      }
     }
 
     // 10. Hemisphere Light (Atmospheric bounce)
@@ -837,20 +872,31 @@ export class AtmosphereManager {
 
       this.hemiLight.color.copy(nightSky).lerp(daySky, dayWeight);
       this.hemiLight.groundColor.copy(nightGround).lerp(dayGround, dayWeight);
-      this.hemiLight.intensity = 0.35 + 0.15 * dayWeight;
+      this.hemiLight.intensity = this.isBlackout ? 0.03 : (0.35 + 0.15 * dayWeight);
     }
 
     // 11. Update Sky Shader uniforms
     if (this.skyMaterial) {
       this.skyMaterial.uniforms.uTime.value = this.elapsedTime;
       this.skyMaterial.uniforms.uDayWeight.value = dayWeight;
-      this.skyMaterial.uniforms.uSunIntensity.value = sunIntensity;
-      this.skyMaterial.uniforms.uMoonIntensity.value = moonIntensity;
+      this.skyMaterial.uniforms.uSunIntensity.value = this.isBlackout ? 0.02 : sunIntensity;
+      this.skyMaterial.uniforms.uMoonIntensity.value = this.isBlackout ? 0.04 : (this.isBloodMoon ? moonIntensity * 1.5 : moonIntensity);
       this.skyMaterial.uniforms.uSunDir.value.copy(this.currentSunDir);
       this.skyMaterial.uniforms.uMoonDir.value.copy(this.currentMoonDir);
-      this.skyMaterial.uniforms.uZenithColor.value.copy(this.currentZenith);
-      this.skyMaterial.uniforms.uMidColor.value.copy(this.currentMid);
-      this.skyMaterial.uniforms.uHorizonColor.value.copy(this.currentHorizon);
+
+      if (this.isBloodMoon) {
+        const bloodZenith = new THREE.Color().copy(this.currentZenith).lerp(new THREE.Color(0x3d0505), 0.75);
+        const bloodHorizon = new THREE.Color().copy(this.currentHorizon).lerp(new THREE.Color(0x8a1010), 0.75);
+        this.skyMaterial.uniforms.uZenithColor.value.copy(bloodZenith);
+        this.skyMaterial.uniforms.uMidColor.value.copy(new THREE.Color(0x5a0a0a));
+        this.skyMaterial.uniforms.uHorizonColor.value.copy(bloodHorizon);
+        this.skyMaterial.uniforms.uMoonColor.value.setHex(0xff2222);
+      } else {
+        this.skyMaterial.uniforms.uZenithColor.value.copy(this.currentZenith);
+        this.skyMaterial.uniforms.uMidColor.value.copy(this.currentMid);
+        this.skyMaterial.uniforms.uHorizonColor.value.copy(this.currentHorizon);
+        this.skyMaterial.uniforms.uMoonColor.value.copy(this.colMoon);
+      }
       this.skyMaterial.uniforms.uSunColor.value.copy(this.currentSunColor);
       this.skyMaterial.uniforms.uMoonColor.value.copy(this.colMoon);
 

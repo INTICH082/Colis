@@ -15,6 +15,7 @@ export enum ClientOpCode {
   BUY_PERSONAL_SKILL = 'BUY_PERSONAL_SKILL',
   PLAYER_ATTACK = 'PLAYER_ATTACK',
   SKIP_PHASE = 'SKIP_PHASE',
+  INTERACT_BREAKER = 'INTERACT_BREAKER',
 }
 
 export enum ServerOpCode {
@@ -32,6 +33,8 @@ export enum ServerOpCode {
   UPGRADES_CHANGED = 'UPGRADES_CHANGED',
   MONSTER_DEFEATED = 'MONSTER_DEFEATED',
   SHIFT_SUMMARY = 'SHIFT_SUMMARY',
+  GAME_EVENT_TRIGGERED = 'GAME_EVENT_TRIGGERED',
+  GAME_EVENT_ENDED = 'GAME_EVENT_ENDED',
 }
 
 // Client -> Server
@@ -104,6 +107,10 @@ export interface PlayerAttackPayload {
   position?: Vector3D;
 }
 
+export interface InteractBreakerPayload {
+  isRepairing: boolean;
+}
+
 export type ClientMessage =
   | { op: ClientOpCode.JOIN_ROOM; data: JoinRoomPayload }
   | { op: ClientOpCode.LEAVE_ROOM }
@@ -118,7 +125,8 @@ export type ClientMessage =
   | { op: ClientOpCode.BUY_TEAM_UPGRADE; data: BuyTeamUpgradePayload }
   | { op: ClientOpCode.BUY_PERSONAL_SKILL; data: BuyPersonalSkillPayload }
   | { op: ClientOpCode.PLAYER_ATTACK; data: PlayerAttackPayload }
-  | { op: ClientOpCode.SKIP_PHASE };
+  | { op: ClientOpCode.SKIP_PHASE }
+  | { op: ClientOpCode.INTERACT_BREAKER; data: InteractBreakerPayload };
 
 // Server -> Client
 export interface InitRoomPayload {
@@ -160,6 +168,7 @@ export interface WorldTickPayload {
     state: string;
   }>;
   shiftTimeRemaining?: number;
+  activeEvent?: import('./types.js').GameEventState | null;
 }
 
 export interface ActionRejectedPayload {
@@ -192,6 +201,16 @@ export interface ShiftSummaryPayload {
   salaryBonus: number;
 }
 
+export interface GameEventTriggeredPayload {
+  event: import('./types.js').GameEventState;
+}
+
+export interface GameEventEndedPayload {
+  eventType: import('./types.js').GameEventType;
+  success: boolean;
+  rewardSummary: string;
+}
+
 export type ServerMessage =
   | { op: ServerOpCode.INIT_ROOM; data: InitRoomPayload }
   | { op: ServerOpCode.PLAYER_JOINED; data: PlayerState }
@@ -206,4 +225,6 @@ export type ServerMessage =
   | { op: ServerOpCode.SHIFT_STATE_CHANGED; data: import('./types.js').ShiftState }
   | { op: ServerOpCode.UPGRADES_CHANGED; data: UpgradesChangedPayload }
   | { op: ServerOpCode.MONSTER_DEFEATED; data: MonsterDefeatedPayload }
-  | { op: ServerOpCode.SHIFT_SUMMARY; data: ShiftSummaryPayload };
+  | { op: ServerOpCode.SHIFT_SUMMARY; data: ShiftSummaryPayload }
+  | { op: ServerOpCode.GAME_EVENT_TRIGGERED; data: GameEventTriggeredPayload }
+  | { op: ServerOpCode.GAME_EVENT_ENDED; data: GameEventEndedPayload };

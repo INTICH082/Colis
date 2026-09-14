@@ -77,6 +77,27 @@ export interface PlayerState {
 
 export type ShiftPhase = 'DAY' | 'EVENING' | 'NIGHT';
 
+export type GameEventType =
+  | 'none'
+  | 'rush_hour'
+  | 'sanitary_inspection'
+  | 'shoplifter'
+  | 'blood_moon'
+  | 'blackout';
+
+export interface GameEventState {
+  type: GameEventType;
+  title: string;
+  description: string;
+  icon: string;
+  durationRemaining: number;
+  totalDuration: number;
+  targetCount?: number;
+  currentCount?: number;
+  progress?: number; // 0..100 (e.g. breaker repair)
+  isCompleted?: boolean;
+}
+
 export interface ShiftState {
   shiftNumber: number;
   phase: ShiftPhase;
@@ -85,9 +106,18 @@ export interface ShiftState {
   customersServedToday: number;
   dailyRevenue: number;
   monstersRepelledTonight: number;
+  activeEvent?: GameEventState | null;
 }
 
-export type CustomerBehaviorState = 'ENTERING' | 'BROWSING' | 'HEADING_TO_CHECKOUT' | 'PAYING' | 'LEAVING' | 'SAD_LEAVING';
+export type CustomerBehaviorState =
+  | 'ENTERING'
+  | 'BROWSING'
+  | 'HEADING_TO_CHECKOUT'
+  | 'PAYING'
+  | 'LEAVING'
+  | 'SAD_LEAVING'
+  | 'FLEEING'
+  | 'KNOCKED_OUT';
 
 export interface CustomerState {
   id: string;
@@ -100,6 +130,9 @@ export interface CustomerState {
   targetShelfId?: string;
   targetSlotIndex?: number;
   waitTimer?: number;
+  isShoplifter?: boolean;
+  isKnockedOut?: boolean;
+  stolenItemName?: string;
 }
 
 export type MonsterType = 'STALKER' | 'VANDAL' | 'BRUTE';
@@ -116,6 +149,7 @@ export interface MonsterState {
   targetId?: string; // playerId or shelfId
   attackCooldown?: number;
   stunTimer?: number;
+  isEnraged?: boolean;
 }
 
 export interface CleanerBotState {
@@ -157,4 +191,5 @@ export interface RoomState {
   customers: Record<string, CustomerState>;
   monsters: Record<string, MonsterState>;
   cleanerBots?: Record<string, CleanerBotState>;
+  activeEvent?: GameEventState | null;
 }

@@ -30,6 +30,7 @@ export class MonsterEntityManager {
     health: number;
     maxHealth: number;
     type: string;
+    isEnraged?: boolean;
   }> | undefined): void {
     if (!serverMonsters) {
       for (const entry of this.monsters.values()) {
@@ -66,6 +67,16 @@ export class MonsterEntityManager {
       const hpRatio = Math.max(0, Math.min(1, data.health / data.maxHealth));
       entry.healthBarFill.scale.x = hpRatio;
       entry.healthBarFill.position.x = -(1 - hpRatio) * 0.35;
+
+      // Enraged visual aura (Blood Moon)
+      const bodyMat = entry.bodyMesh.material as THREE.MeshStandardMaterial;
+      if (data.isEnraged) {
+        bodyMat.emissive.setHex(0xd90429);
+        bodyMat.emissiveIntensity = 0.45;
+      } else if (entry.hitFlashTimer <= 0) {
+        bodyMat.emissive.setHex(0x000000);
+        bodyMat.emissiveIntensity = 0;
+      }
     }
 
     // Cleanup defeated monsters
