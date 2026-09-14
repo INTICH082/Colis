@@ -22,7 +22,38 @@ export class BoxEntityManager {
 
   private static cardboardAsset: LoadedBoxAssets | null = null;
   private static productAssets: Map<string, THREE.Group> = new Map();
+  private static stickerMaterialCache: Map<string, THREE.MeshStandardMaterial> = new Map();
   private static loadPromise: Promise<void> | null = null;
+
+  private static getStickerMaterial(productId: string, product: any): THREE.MeshStandardMaterial {
+    let mat = this.stickerMaterialCache.get(productId);
+    if (!mat) {
+      const labelCanvas = document.createElement('canvas');
+      labelCanvas.width = 256;
+      labelCanvas.height = 128;
+      const ctx = labelCanvas.getContext('2d')!;
+      ctx.fillStyle = product.color || '#e63946';
+      ctx.fillRect(0, 0, 256, 128);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(6, 6, 244, 116);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 30px "Handgeschrieben", cursive, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(product.name, 128, 64);
+
+      const labelTex = new THREE.CanvasTexture(labelCanvas);
+      labelTex.magFilter = THREE.NearestFilter;
+      mat = new THREE.MeshStandardMaterial({
+        map: labelTex,
+        roughness: 0.8,
+        metalness: 0.05,
+      });
+      this.stickerMaterialCache.set(productId, mat);
+    }
+    return mat;
+  }
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -217,28 +248,7 @@ export class BoxEntityManager {
       // Configure sticker label on front
       const stickerNode = cardboardClone.getObjectByName('sticker') as THREE.Mesh | undefined;
       if (stickerNode) {
-        const labelCanvas = document.createElement('canvas');
-        labelCanvas.width = 256;
-        labelCanvas.height = 128;
-        const ctx = labelCanvas.getContext('2d')!;
-        ctx.fillStyle = product.color || '#e63946';
-        ctx.fillRect(0, 0, 256, 128);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 8;
-        ctx.strokeRect(6, 6, 244, 116);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 30px "Handgeschrieben", cursive, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(product.name, 128, 64);
-
-        const labelTex = new THREE.CanvasTexture(labelCanvas);
-        labelTex.magFilter = THREE.NearestFilter;
-        stickerNode.material = new THREE.MeshStandardMaterial({
-          map: labelTex,
-          roughness: 0.8,
-          metalness: 0.05,
-        });
+        stickerNode.material = BoxEntityManager.getStickerMaterial(box.productId, product);
       }
 
       // Ensure all meshes in cardboard receive shadows, click raycast userData

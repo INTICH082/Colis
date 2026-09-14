@@ -71,6 +71,75 @@ export interface PlayerState {
   isMoving: boolean;
   heldBoxId: string | null;
   ping?: number;
+  personalCash?: number;
+  personalSkills?: string[];
+}
+
+export type ShiftPhase = 'DAY' | 'EVENING' | 'NIGHT';
+
+export interface ShiftState {
+  shiftNumber: number;
+  phase: ShiftPhase;
+  phaseTimeRemaining: number; // in seconds
+  totalPhaseDuration: number;
+  customersServedToday: number;
+  dailyRevenue: number;
+  monstersRepelledTonight: number;
+}
+
+export type CustomerBehaviorState = 'ENTERING' | 'BROWSING' | 'HEADING_TO_CHECKOUT' | 'PAYING' | 'LEAVING' | 'SAD_LEAVING';
+
+export interface CustomerState {
+  id: string;
+  name: string;
+  position: Vector3D;
+  rotationY: number;
+  state: CustomerBehaviorState;
+  targetPos: Vector3D;
+  heldProductId: string | null;
+  targetShelfId?: string;
+  targetSlotIndex?: number;
+  waitTimer?: number;
+}
+
+export type MonsterType = 'STALKER' | 'VANDAL' | 'BRUTE';
+export type MonsterBehaviorState = 'SPAWNING' | 'CHASING_PLAYER' | 'ATTACKING_PLAYER' | 'TARGETING_SHELF' | 'ATTACKING_SHELF' | 'STUNNED' | 'DEFEATED';
+
+export interface MonsterState {
+  id: string;
+  type: MonsterType;
+  position: Vector3D;
+  rotationY: number;
+  health: number;
+  maxHealth: number;
+  state: MonsterBehaviorState;
+  targetId?: string; // playerId or shelfId
+  attackCooldown?: number;
+  stunTimer?: number;
+}
+
+export interface CleanerBotState {
+  id: string;
+  position: Vector3D;
+  rotationY: number;
+  state: 'PATROLLING' | 'CLEANING';
+  targetPos?: Vector3D;
+}
+
+export interface TeamUpgradeDef {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
+}
+
+export interface PersonalSkillDef {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
 }
 
 export interface RoomState {
@@ -83,4 +152,9 @@ export interface RoomState {
   boxes: Record<string, BoxState>;
   storeMoney: number;
   storeLevel: number;
+  shift: ShiftState;
+  teamUnlocks: string[];
+  customers: Record<string, CustomerState>;
+  monsters: Record<string, MonsterState>;
+  cleanerBots?: Record<string, CleanerBotState>;
 }

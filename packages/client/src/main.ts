@@ -7,9 +7,10 @@ import {
   RoomState,
   SHELF_CONFIG,
   ShelfState,
+  ShiftState,
+  UpgradesChangedPayload,
   WorldTickPayload,
   cameraToWorldInput,
-  distance,
   distanceXZ,
 } from '@colis/shared';
 import { GameRenderer } from './render/GameRenderer.js';
@@ -18,6 +19,9 @@ import { StoreEnvironment } from './render/StoreEnvironment.js';
 import { InstancedShelfManager } from './render/InstancedShelfManager.js';
 import { BoxEntityManager } from './entities/BoxEntityManager.js';
 import { PlayerEntity } from './entities/PlayerEntity.js';
+import { CustomerEntityManager } from './entities/CustomerEntityManager.js';
+import { MonsterEntityManager } from './entities/MonsterEntityManager.js';
+import { CleanerBotEntity } from './entities/CleanerBotEntity.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIOverlay } from './ui/UIOverlay.js';
@@ -31,6 +35,9 @@ class ColisGame {
   private environment: StoreEnvironment;
   private shelfManager: InstancedShelfManager;
   private boxManager: BoxEntityManager;
+  private customerManager: CustomerEntityManager;
+  private monsterManager: MonsterEntityManager;
+  private cleanerBot: CleanerBotEntity;
   private ui: UIOverlay;
   private network: NetworkClient;
 
@@ -48,6 +55,9 @@ class ColisGame {
   private remotePlayers: Map<string, PlayerEntity> = new Map();
   private localPlayerEntity: PlayerEntity | null = null;
   private currentRoom: RoomState | null = null;
+  private currentShift: ShiftState | null = null;
+  private mySkills: string[] = [];
+  private teamUnlocks: string[] = [];
 
   // Input state & Physics velocity
   private keys: Record<string, boolean> = {};
@@ -56,8 +66,7 @@ class ColisGame {
   private verticalVelocity: number = 0;
   private isGrounded: boolean = true;
 
-  // Sprint Stamina (5 seconds sprint, 2 seconds rest before gradual recovery)
-  private readonly MAX_STAMINA: number = 5.0;
+  // Sprint Stamina (5s or 10s with marathoner)
   private currentStamina: number = 5.0;
   private timeSinceSprint: number = 2.0;
 
@@ -76,10 +85,12 @@ class ColisGame {
     this.environment = new StoreEnvironment(this.renderer.scene);
     this.shelfManager = new InstancedShelfManager(this.renderer.scene);
     this.boxManager = new BoxEntityManager(this.renderer.scene);
+    this.customerManager = new CustomerEntityManager(this.renderer.scene);
+    this.monsterManager = new MonsterEntityManager(this.renderer.scene);
+    this.cleanerBot = new CleanerBotEntity(this.renderer.scene);
     this.physics = new PhysicsWorld();
     this.ui = new UIOverlay();
 
-    // Determine WS server URL (uses current hostname, port 8080)
     const host = window.location.hostname || 'localhost';
     const serverUrl = `ws://${host}:8080`;
 
@@ -91,6 +102,9 @@ class ColisGame {
       onBoxChanged: this.handleBoxChanged,
       onShelfChanged: this.handleShelfChanged,
       onEconomyChanged: this.handleEconomyChanged,
+      onShiftChanged: this.handleShiftChanged,
+      onUpgradesChanged: this.handleUpgradesChanged,
+      onShiftSummary: (s) => this.ui.showShiftSummary(s),
       onNotification: (n) => this.ui.showNotification(n),
       onPlayerTackled: (data) => {
         const isLocalVictim = data.victimId === this.localPlayerId;
@@ -101,7 +115,7 @@ class ColisGame {
           this.ui.showNotification({
             type: 'warning',
             message: isLocalVictim
-              ? (data.attackerId === 'box' || !data.attackerId ? '😵 В тебя попала коробка! Оглушен на 3 сек!' : 'Тебя сбили с ног в рэгдолл!')
+              ? (data.attackerId === 'box' || !data.attackerId ? '😵 В тебя попала коробка! Оглушен на 3 сек!' : 'Тебя сбили с ног!')
               : (data.attackerId === 'box' ? 'Игрока оглушило прилетевшей коробкой!' : 'Игрока сбили с ног!'),
           });
         }
@@ -123,7 +137,8 @@ class ColisGame {
   public async start(): Promise<void> {
     console.log('[ColisGame] Initializing Rapier3D physics engine...');
     await this.physics.init();
-    console.log('[ColisGame] Loading 3D character model and animations...');
+
+    console.log('[ColisGame] Preloading 3D models and textures...');
     await PlayerEntity.loadAssets().catch((err) => {
       console.warn('[ColisGame] Failed to preload character model:', err);
     });
@@ -141,11 +156,8 @@ class ColisGame {
       await document.fonts.ready;
     }
 
-    console.log('[ColisGame] Physics, models and fonts ready. Connecting to multiplayer server...');
-
-    // Ask user for their name if first time
-    const savedName = localStorage.getItem('colis_player_name') || `Работник #${Math.floor(Math.random() * 900 + 100)}`;
-    this.network.connect('store-main', savedName);
+    console.log('[ColisGame] Connecting to server WebSocket...');
+    this.network.connect('store-main', 'Сотрудник');
 
     this.lastTime = performance.now();
     requestAnimationFrame(this.gameLoop);
@@ -160,32 +172,33 @@ class ColisGame {
 
       this.keys[e.code] = true;
 
-      // Debug: Smooth time-of-day transitions (1 = Morning, 2 = Night)
+      // Debug: Smooth time-of-day transitions
       if (e.code === 'Digit1' || e.code === 'Numpad1') {
         this.atmosphere.transitionToTime(0.08);
-        this.ui.showNotification({
-          type: 'info',
-          message: '🌅 Наступает утро...',
-        });
       } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
         this.atmosphere.transitionToTime(0.72);
-        this.ui.showNotification({
-          type: 'info',
-          message: '🌙 Наступает ночь...',
-        });
       }
 
-      // Jump & Interaction keys
+      // Space: Jump
       if (e.code === 'Space') {
         if (this.isGrounded) {
-          this.verticalVelocity = 5.8; // Snappy jump impulse
+          this.verticalVelocity = 5.8;
           this.isGrounded = false;
         }
       } else if (e.code === 'KeyE') {
+        // E: Take box into hands / drop on floor
         this.handleActionE();
       } else if (e.code === 'KeyR') {
+        // R: Open box
         this.handleActionOpenBox();
+      } else if (e.code === 'KeyF') {
+        // F: Melee weapon attack / shove against monsters
+        this.handleActionAttack();
+      } else if (e.code === 'KeyU') {
+        // U: Toggle Upgrades & Skills modal
+        this.ui.toggleUpgradesModal();
       } else if (e.code === 'KeyG') {
+        // G: Start charging throw
         if (!e.repeat && this.localPlayerState.heldBoxId && !this.localPlayerEntity?.isKnockedDown()) {
           this.isChargingThrow = true;
           this.throwChargeStartTime = performance.now();
@@ -203,14 +216,13 @@ class ColisGame {
     });
 
     window.addEventListener('mousedown', (e) => {
-      // Ignore if clicking UI elements
       if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 
       if (e.button === 0) {
-        // Left click: place product onto hovered shelf slot
+        // Left click: Place product onto shelf OR attack monster
         this.handleLeftClick();
       } else if (e.button === 2) {
-        // Right click: take product from shelf
+        // Right click: Take product from shelf
         this.handleRightClick();
       }
     });
@@ -221,7 +233,6 @@ class ColisGame {
       }
     });
 
-    // Reset all pressed keys when window loses/gains focus or tab is hidden
     const clearKeys = () => {
       this.keys = {};
       if (this.isChargingThrow) {
@@ -233,17 +244,12 @@ class ColisGame {
     window.addEventListener('blur', clearKeys);
     window.addEventListener('focus', clearKeys);
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        clearKeys();
-      }
+      if (document.hidden) clearKeys();
     });
 
-    // Notify server on browser tab close and disconnect cleanly
     const handleTabClose = () => {
       try {
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon('/api/tab-closed');
-        }
+        if (navigator.sendBeacon) navigator.sendBeacon('/api/tab-closed');
       } catch {}
       this.network.disconnect();
     };
@@ -260,20 +266,50 @@ class ColisGame {
       onChangeRoom: (roomId) => {
         this.network.connect(roomId, this.localPlayerState.name);
       },
+      onBuyTeamUpgrade: (upgradeId) => {
+        this.network.sendBuyTeamUpgrade(upgradeId);
+      },
+      onBuyPersonalSkill: (skillId) => {
+        this.network.sendBuyPersonalSkill(skillId);
+      },
+      onSkipPhase: () => {
+        this.network.sendSkipPhase();
+      },
     });
   }
 
+  // ==========================================
+  // BOX CONTROLS: E (PICKUP/DROP) & R (OPEN)
+  // ==========================================
   private handleActionE(): void {
+    if (this.localPlayerEntity?.isKnockedDown()) return;
+
+    // If already holding box -> gentle drop on floor
+    if (this.localPlayerState.heldBoxId) {
+      this.network.sendDropBox({ throwForce: 0 });
+      return;
+    }
+
+    // If looking at a box nearby -> pick it up into hands!
     if (this.hoveredBox) {
-      const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
-      if (box && !box.isOpen) {
-        this.network.sendOpenBox(this.hoveredBox.boxId, this.localPlayerState.position);
-        this.boxManager.openBoxLocal(this.hoveredBox.boxId);
-      }
+      this.network.sendPickupBox(this.hoveredBox.boxId, this.localPlayerState.position);
     }
   }
 
   private handleActionOpenBox(): void {
+    if (this.localPlayerEntity?.isKnockedDown()) return;
+
+    // If holding a box in hands -> open held box!
+    if (this.localPlayerState.heldBoxId) {
+      const box = this.currentRoom?.boxes[this.localPlayerState.heldBoxId];
+      if (box && !box.isOpen) {
+        this.network.sendOpenBox(this.localPlayerState.heldBoxId, this.localPlayerState.position);
+        this.boxManager.openBoxLocal(this.localPlayerState.heldBoxId);
+      }
+      return;
+    }
+
+    // If looking at a closed box on the floor -> open it!
     if (this.hoveredBox) {
       const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
       if (box && !box.isOpen) {
@@ -284,21 +320,71 @@ class ColisGame {
   }
 
   private updateThrowCharging(): void {
-    // Disabled temporarily
-    if (this.isChargingThrow) {
+    if (!this.isChargingThrow) return;
+
+    if (!this.localPlayerState.heldBoxId || this.localPlayerEntity?.isKnockedDown()) {
       this.isChargingThrow = false;
       this.ui.setThrowCharge(null);
+      return;
+    }
+
+    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
+    if (elapsedSec < 0.15) {
+      this.ui.setThrowCharge(0);
+    } else {
+      const ratio = THREE.MathUtils.clamp((elapsedSec - 0.15) / 1.0, 0, 1);
+      this.ui.setThrowCharge(ratio);
     }
   }
 
   private finishThrowCharge(): void {
-    // Disabled temporarily
+    if (!this.isChargingThrow) return;
     this.isChargingThrow = false;
     this.ui.setThrowCharge(null);
+
+    if (!this.localPlayerState.heldBoxId) return;
+
+    const elapsedSec = (performance.now() - this.throwChargeStartTime) / 1000;
+    if (elapsedSec < 0.2) {
+      // Gentle drop right in front
+      this.network.sendDropBox({ throwForce: 0 });
+      return;
+    }
+
+    // Ballistic throw with charge force
+    const forceRatio = THREE.MathUtils.clamp((elapsedSec - 0.2) / 1.0, 0.15, 1.0);
+    const rotY = this.localPlayerState.rotationY;
+    const speed = 3.5 + forceRatio * 11.5;
+    const vx = -Math.sin(rotY) * speed;
+    const vz = -Math.cos(rotY) * speed;
+    const vy = 1.6 + forceRatio * 3.6;
+
+    this.network.sendDropBox({
+      throwForce: forceRatio,
+      throwVelocity: { x: vx, y: vy, z: vz },
+    });
   }
 
   private handleLeftClick(): void {
-    // Clicking a closed box opens it once
+    if (this.localPlayerEntity?.isKnockedDown()) return;
+
+    // 1. If holding box and looking at shelf slot -> place product onto shelf
+    if (this.localPlayerState.heldBoxId && this.hoveredSlot) {
+      this.network.sendPlaceProduct(
+        this.hoveredSlot.shelfId,
+        this.hoveredSlot.slotIndex,
+        this.localPlayerState.position
+      );
+      return;
+    }
+
+    // 2. If near night monster or carrying weapon -> attack!
+    if (this.currentShift?.phase === 'NIGHT' || this.mySkills.includes('security_bat')) {
+      this.handleActionAttack();
+      return;
+    }
+
+    // 3. If clicking a closed box on the floor -> open it
     if (this.hoveredBox) {
       const box = this.currentRoom?.boxes[this.hoveredBox.boxId];
       if (box && !box.isOpen) {
@@ -309,26 +395,63 @@ class ColisGame {
   }
 
   private handleRightClick(): void {
-    // Disabled temporarily
+    if (this.localPlayerEntity?.isKnockedDown()) return;
+
+    // Take product from shelf back into held box
+    if (this.localPlayerState.heldBoxId && this.hoveredSlot) {
+      this.network.sendTakeProduct(
+        this.hoveredSlot.shelfId,
+        this.hoveredSlot.slotIndex,
+        this.localPlayerState.position
+      );
+    }
   }
 
+  private handleActionAttack(): void {
+    if (this.localPlayerEntity?.isKnockedDown()) return;
+    const rotY = this.localPlayerState.rotationY;
+    const hitDirection = {
+      x: -Math.sin(rotY),
+      y: 0,
+      z: -Math.cos(rotY),
+    };
+    this.network.sendPlayerAttack(hitDirection);
+  }
+
+  // ==========================================
+  // ROOM INIT & MULTIPLAYER SYNC
+  // ==========================================
   private handleRoomInit = (data: InitRoomPayload): void => {
     this.localPlayerId = data.yourPlayerId;
     this.currentRoom = data.room;
 
-    // Build shelves
+    // Sync Shelves
     this.environment.syncShelves(data.room.shelves);
     this.shelfManager.updateShelves(data.room.shelves);
     this.physics.registerShelves(data.room.shelves);
 
-    // Sync boxes
+    // Sync Boxes
     this.boxManager.syncBoxes(data.room.boxes);
 
-    // Sync economy & UI
+    // Sync Economy & Shifts
     this.ui.updateMoney(data.room.storeMoney);
     this.ui.updateRoomInfo(data.room.roomId, Object.keys(data.room.players).length);
 
-    // Spawn local player & remote players
+    if (data.room.shift) {
+      this.currentShift = data.room.shift;
+      this.ui.updateShift(this.currentShift);
+      this.updateAtmosphereShift(this.currentShift);
+    }
+
+    this.teamUnlocks = data.room.teamUnlocks || [];
+    const localP = data.room.players[this.localPlayerId];
+    if (localP) {
+      this.mySkills = localP.personalSkills || [];
+      this.ui.updatePersonalCash(localP.personalCash || 50);
+    }
+    this.ui.setUpgradesData(this.teamUnlocks, this.mySkills);
+
+    // Spawn local & remote players
     for (const [id, pState] of Object.entries(data.room.players)) {
       if (id === this.localPlayerId) {
         this.localPlayerState = { ...pState };
@@ -345,6 +468,13 @@ class ColisGame {
       }
     }
 
+    // Sync Customers & Monsters
+    this.customerManager.syncCustomers(data.room.customers);
+    this.monsterManager.syncMonsters(data.room.monsters);
+    if (data.room.cleanerBots) {
+      this.cleanerBot.sync(Object.values(data.room.cleanerBots)[0]);
+    }
+
     this.ui.showNotification({
       type: 'success',
       message: `Добро пожаловать в ${data.room.name}!`,
@@ -352,9 +482,9 @@ class ColisGame {
   };
 
   private handleWorldTick = (tick: WorldTickPayload): void => {
+    // 1. Players
     for (const [id, pData] of Object.entries(tick.players)) {
       if (id === this.localPlayerId) {
-        // Update local held box state if server changed it
         this.localPlayerState.heldBoxId = pData.heldBoxId;
       } else {
         const remote = this.remotePlayers.get(id);
@@ -375,7 +505,46 @@ class ColisGame {
       }
     }
 
+    // 2. Customers & Monsters & Cleaner
+    this.customerManager.syncCustomers(tick.customers);
+    this.monsterManager.syncMonsters(tick.monsters);
+    if (tick.cleanerBots) {
+      this.cleanerBot.sync(Object.values(tick.cleanerBots)[0]);
+    } else {
+      this.cleanerBot.sync(undefined);
+    }
+
+    // 3. Shift Countdown
+    if (tick.shiftTimeRemaining !== undefined && this.currentShift) {
+      this.currentShift.phaseTimeRemaining = tick.shiftTimeRemaining;
+      this.ui.updateShift(this.currentShift);
+    }
+
     this.updateHeldBoxUI();
+  };
+
+  private handleShiftChanged = (shift: ShiftState): void => {
+    this.currentShift = shift;
+    this.ui.updateShift(shift);
+    this.updateAtmosphereShift(shift);
+  };
+
+  private updateAtmosphereShift(shift: ShiftState): void {
+    if (shift.phase === 'DAY') {
+      this.atmosphere.transitionToTime(0.22); // Morning/Day
+    } else if (shift.phase === 'EVENING') {
+      this.atmosphere.transitionToTime(0.55); // Sunset
+    } else {
+      this.atmosphere.transitionToTime(0.78); // Night
+    }
+  }
+
+  private handleUpgradesChanged = (upgrades: UpgradesChangedPayload): void => {
+    this.teamUnlocks = upgrades.teamUnlocks;
+    this.mySkills = upgrades.playerSkills[this.localPlayerId] || [];
+    const cash = upgrades.personalCash[this.localPlayerId] ?? 50;
+    this.ui.updatePersonalCash(cash);
+    this.ui.setUpgradesData(this.teamUnlocks, this.mySkills);
   };
 
   private handlePlayerJoined = (player: PlayerState): void => {
@@ -444,6 +613,9 @@ class ColisGame {
     });
   }
 
+  // ==========================================
+  // GAME LOOP
+  // ==========================================
   private gameLoop = (): void => {
     requestAnimationFrame(this.gameLoop);
 
@@ -454,6 +626,9 @@ class ColisGame {
     this.updatePlayerMovement(dt);
     this.updateThrowCharging();
     this.boxManager.update(dt);
+    this.customerManager.update(dt);
+    this.monsterManager.update(dt);
+    this.cleanerBot.update(dt);
     this.updateRaycasting();
     this.updateInterpolations(dt);
 
@@ -463,15 +638,14 @@ class ColisGame {
       this.environment.updateWallOcclusion(this.renderer.camera.position, this.localPlayerEntity.group.position, dt);
     }
 
-    // Update sky dome and ocean waves
+    // Update dynamic sky & ocean
     this.atmosphere.update(dt, this.renderer.camera.position, this.renderer.currentCameraTarget);
 
-    // Render 3D Scene
+    // Render Scene
     this.renderer.render();
   };
 
   private updatePlayerMovement(dt: number): void {
-    // If local player is knocked down / getting up, disable input and apply sliding physics
     if (this.localPlayerEntity?.isKnockedDown()) {
       this.localPlayerEntity.tick(dt, false, false, false, 0, 0);
       const slidPos = this.localPlayerEntity.group.position;
@@ -507,12 +681,14 @@ class ColisGame {
     if (this.keys['KeyD'] || this.keys['ArrowRight']) inputX += 1;
 
     const shiftPressed = !!this.keys['ShiftLeft'] || !!this.keys['ShiftRight'];
-
-    // Convert screen WASD into isometric camera-relative world direction
     const worldDir = cameraToWorldInput(inputX, inputZ);
     const isMoving = Math.hypot(worldDir.x, worldDir.z) > 0.05;
 
-    // Sprint Stamina: 5 seconds max sprint, 2 seconds delay before gradual recovery
+    // Stamina calculation (10s if marathoner, 5s default)
+    const hasMarathoner = this.mySkills.includes('marathoner');
+    const maxStamina = hasMarathoner ? 10.0 : 5.0;
+    const recoveryMultiplier = hasMarathoner ? 2.0 : 1.0;
+
     let isSprinting = false;
     if (shiftPressed && isMoving && this.currentStamina > 0.05) {
       isSprinting = true;
@@ -521,27 +697,26 @@ class ColisGame {
     } else {
       isSprinting = false;
       this.timeSinceSprint += dt;
-      if (this.timeSinceSprint >= 2.0) {
-        // Recovers to full over ~3.5s after 2s cooldown
-        this.currentStamina = Math.min(this.MAX_STAMINA, this.currentStamina + dt * (this.MAX_STAMINA / 3.5));
+      if (this.timeSinceSprint >= (hasMarathoner ? 1.0 : 2.0)) {
+        this.currentStamina = Math.min(maxStamina, this.currentStamina + dt * (maxStamina / 3.0) * recoveryMultiplier);
       }
     }
 
-    this.ui.setStamina(this.currentStamina / this.MAX_STAMINA);
+    this.ui.setStamina(this.currentStamina / maxStamina);
 
-    const speed = isSprinting ? 7.0 : 4.5;
+    // Speed calculation (heavy lifter allows sprinting with box without penalty)
+    const speed = isSprinting ? 7.2 : 4.5;
 
-    // Vertical jump and gravity physics simulation
+    // Gravity & grounding
     const wasGrounded = this.physics.isGrounded();
     if (wasGrounded && this.verticalVelocity <= 0) {
       this.isGrounded = true;
-      this.verticalVelocity = -0.5; // gentle grounding bias
+      this.verticalVelocity = -0.5;
     } else {
       this.isGrounded = false;
-      this.verticalVelocity -= 18.0 * dt; // gravity
+      this.verticalVelocity -= 18.0 * dt;
     }
 
-    // Movement via Rapier3D Kinematic Character Controller
     const desiredDelta = {
       x: worldDir.x * speed * dt,
       y: this.verticalVelocity * dt,
@@ -556,7 +731,7 @@ class ColisGame {
     }
     this.localPlayerState.position = newPos;
 
-    // Rotate player towards mouse aim or movement direction
+    // Rotation towards mouse aim or movement
     const mouseFloor = this.renderer.getGroundIntersection(0.8);
     let targetRotationY = this.localPlayerState.rotationY;
     if (mouseFloor) {
@@ -572,17 +747,13 @@ class ColisGame {
     while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
 
     if (isMoving) {
-      // Rapid responsive turning while walking/running (22 rad/s)
       this.localPlayerState.rotationY += rotDiff * Math.min(1.0, 22.0 * dt);
     } else {
-      // Smooth, agile, and responsive turning while aiming on the spot (14 rad/s)
       this.localPlayerState.rotationY += rotDiff * Math.min(1.0, 14.0 * dt);
     }
 
-    // Player is only considered airborne when clearly elevated above floor
     const isAirborne = !this.isGrounded && newPos.y > 0.15;
 
-    // Sync visual player mesh and procedural ragdoll
     if (this.localPlayerEntity) {
       this.localPlayerEntity.group.position.set(newPos.x, newPos.y, newPos.z);
       this.localPlayerEntity.group.rotation.y = this.localPlayerState.rotationY;
@@ -598,9 +769,8 @@ class ColisGame {
       );
     }
 
+    // Sprint Tackle
     const nowSec = performance.now() / 1000;
-
-    // Check Player-vs-Player Sprint Tackle
     if (isSprinting && isMoving && speed > 5.2 && nowSec - this.lastTackleTime > 1.2) {
       for (const [remoteId, remotePlayer] of this.remotePlayers.entries()) {
         if (remotePlayer.isKnockedDown()) continue;
@@ -613,22 +783,12 @@ class ColisGame {
           const tackleImpulse = new THREE.Vector3(worldDir.x, 0, worldDir.z).normalize();
           remotePlayer.knockdown(tackleImpulse, 1.4, 3.0);
           this.network.sendPlayerTackle(remoteId, tackleImpulse.x, tackleImpulse.z, 1.4, 3.0);
-
-          // Local player impact recoil
-          if (this.localPlayerEntity?.ragdoll) {
-            this.localPlayerEntity.ragdoll.torsoPitchSpring.impulse(-2.2);
-            this.localPlayerEntity.ragdoll.torsoYSpring.impulse(-1.2);
-          }
-          this.ui.showNotification({
-            type: 'success',
-            message: '💥 Ты с разбега сбил игрока в рэгдолл!',
-          });
           break;
         }
       }
     }
 
-    // Send input to server at tick rate (~25Hz)
+    // Network Sync
     this.networkSendTimer += dt;
     if (this.networkSendTimer >= 0.04) {
       const sendDeltaMs = Math.round(this.networkSendTimer * 1000);
@@ -647,6 +807,9 @@ class ColisGame {
     }
   }
 
+  // ==========================================
+  // RAYCASTING & INTERACTION PROMPTS
+  // ==========================================
   private updateRaycasting(): void {
     this.renderer.raycaster.setFromCamera(this.renderer.mousePos, this.renderer.camera);
 
@@ -678,8 +841,25 @@ class ColisGame {
             };
             (this.hoveredSlot.mesh.material as THREE.MeshBasicMaterial).opacity = 0.35;
 
-            // Show info only if shelf slot contains items
-            if (slot.count > 0) {
+            // Formulate prompt based on held box
+            if (this.localPlayerState.heldBoxId && this.currentRoom) {
+              const heldBox = this.currentRoom.boxes[this.localPlayerState.heldBoxId];
+              const prod = heldBox ? PRODUCTS[heldBox.productId] : null;
+
+              if (heldBox && !heldBox.isOpen) {
+                this.ui.setInteractionPrompt('Сначала откройте коробку (нажмите R)', 'R');
+              } else if (slot.productId && slot.productId !== heldBox?.productId && slot.count > 0) {
+                this.ui.setInteractionPrompt(`Слот занят другим товаром (${PRODUCTS[slot.productId]?.name})`, '!');
+              } else if (slot.count >= slot.maxCount) {
+                this.ui.setInteractionPrompt(`Слот полон (макс. ${slot.maxCount} шт.)`, '!');
+              } else {
+                this.ui.setInteractionPrompt(
+                  `[ЛКМ] Выставить ${prod?.name || 'товар'} (Слот ${slot.index + 1}: ${slot.count}/${slot.maxCount})`,
+                  'ЛКМ'
+                );
+              }
+              return;
+            } else if (slot.count > 0) {
               const prod = PRODUCTS[slot.productId || ''];
               this.ui.setInteractionPrompt(
                 `Полка: ${prod?.name || 'Товар'} (${slot.count} шт.)`,
@@ -712,23 +892,35 @@ class ColisGame {
           const prod = PRODUCTS[box.productId];
           const prodName = prod?.name || box.productId;
 
-          if (!box.isOpen) {
-            this.ui.setInteractionPrompt(
-              `[Клик / E] Открыть коробку: "${prodName}"`,
-              'E'
-            );
-          } else {
-            this.ui.setInteractionPrompt(
-              `"${prodName}" (Коробка открыта)`,
-              '✓'
-            );
+          if (!this.localPlayerState.heldBoxId) {
+            if (!box.isOpen) {
+              this.ui.setInteractionPrompt(
+                `[E] Взять | [R] Открыть: "${prodName}" (${box.remainingItems}/${box.maxItems})`,
+                'E'
+              );
+            } else {
+              this.ui.setInteractionPrompt(
+                `[E] Взять открытую коробку: "${prodName}" (${box.remainingItems}/${box.maxItems})`,
+                'E'
+              );
+            }
+            return;
           }
-          return;
         }
       }
     }
 
-    // If nothing interactive hovered
+    // Prompt if holding a box in hands
+    if (this.localPlayerState.heldBoxId && this.currentRoom) {
+      const heldBox = this.currentRoom.boxes[this.localPlayerState.heldBoxId];
+      if (heldBox && !heldBox.isOpen) {
+        this.ui.setInteractionPrompt('[R] Открыть коробку | [E] Положить | [G] Бросить', 'R');
+      } else {
+        this.ui.setInteractionPrompt('[E] Положить коробку | [G] Бросить (зажать)', 'E');
+      }
+      return;
+    }
+
     this.ui.setInteractionPrompt(null);
   }
 
@@ -739,7 +931,6 @@ class ColisGame {
   }
 }
 
-// Bootstrap application on window load
 window.addEventListener('DOMContentLoaded', () => {
   const game = new ColisGame();
   game.start().catch((err) => {

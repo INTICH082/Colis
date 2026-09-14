@@ -170,3 +170,124 @@ export const STORE_LAYOUT = {
     center: { x: 7, y: 0, z: 6 } as Vector3D,
   }
 } as const;
+
+export const SHIFT_CONFIG = {
+  DAY_DURATION: 90, // 90 seconds
+  EVENING_DURATION: 45, // 45 seconds
+  NIGHT_DURATION: 60, // 60 seconds
+  BASE_SALARY: 50, // base salary paid to each player per shift
+  CUSTOMER_SPAWN_INTERVAL_BASE: 4.5, // seconds between customer spawns
+  CUSTOMER_SPAWN_INTERVAL_BAKERY: 2.5, // with bakery upgrade
+  MAX_CUSTOMERS: 8,
+  NIGHT_MONSTER_COUNT_BASE: 5,
+} as const;
+
+export const TEAM_UPGRADES: Record<string, {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
+}> = {
+  cleaner_bot: {
+    id: 'cleaner_bot',
+    name: 'Робот-уборщик',
+    description: 'Автономный уборщик патрулирует магазин и собирает пустые коробки с пола.',
+    cost: 300,
+    icon: '🤖',
+  },
+  bakery_dept: {
+    id: 'bakery_dept',
+    name: 'Отдел свежей выпечки',
+    description: 'Привлекает на 50% больше покупателей и повышает ежедневную выручку.',
+    cost: 450,
+    icon: '🥐',
+  },
+  reinforced_shelves: {
+    id: 'reinforced_shelves',
+    name: 'Укрепленные стеллажи',
+    description: 'Стеллажи становятся намного прочнее и выдерживают атаки ночных монстров.',
+    cost: 350,
+    icon: '🛡️',
+  },
+  shock_grid: {
+    id: 'shock_grid',
+    name: 'Электро-ловушки на входе',
+    description: 'Шоковые барьеры у дверей наносят урон и замедляют вторгшихся монстров.',
+    cost: 500,
+    icon: '⚡',
+  },
+};
+
+export const PERSONAL_SKILLS: Record<string, {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
+}> = {
+  security_bat: {
+    id: 'security_bat',
+    name: 'Бита охранника',
+    description: 'Личное оружие! Клавиша [F / ЛКМ] наносит сокрушительный удар и отбрасывает монстров.',
+    cost: 50,
+    icon: '🏏',
+  },
+  heavy_lifter: {
+    id: 'heavy_lifter',
+    name: 'Силач',
+    description: 'Спринт с коробками без потери скорости, а сила и дальность броска увеличены на 50%.',
+    cost: 40,
+    icon: '💪',
+  },
+  marathoner: {
+    id: 'marathoner',
+    name: 'Марафонец',
+    description: 'Выносливость увеличена в 2 раза (10 сек бега) и начинает восстанавливаться быстрее.',
+    cost: 35,
+    icon: '🏃',
+  },
+  speed_stocker: {
+    id: 'speed_stocker',
+    name: 'Супер-мерчендайзер',
+    description: 'Раскладка товаров на полку происходит сразу по 2 единицы за клик.',
+    cost: 45,
+    icon: '⚡',
+  },
+};
+
+export const MONSTER_CONFIG = {
+  STALKER: {
+    type: 'STALKER' as const,
+    name: 'Охотник',
+    health: 40,
+    speed: 4.0,
+    damage: 15,
+    tackleForce: 1.5,
+    tackleDuration: 3.0,
+    attackRange: 1.1,
+    color: '#ef4444',
+  },
+  VANDAL: {
+    type: 'VANDAL' as const,
+    name: 'Вандал',
+    health: 30,
+    speed: 3.2,
+    shelfDamage: 1,
+    attackInterval: 2.2,
+    attackRange: 1.4,
+    color: '#a855f7',
+  },
+  BRUTE: {
+    type: 'BRUTE' as const,
+    name: 'Опустошитель',
+    health: 85,
+    speed: 2.3,
+    damage: 25,
+    tackleForce: 2.2,
+    tackleDuration: 3.0,
+    shelfDamage: 2,
+    attackRange: 1.5,
+    color: '#ea580c',
+  },
+} as const;

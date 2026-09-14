@@ -11,6 +11,10 @@ export enum ClientOpCode {
   INTERACT_TAKE_PRODUCT = 'INTERACT_TAKE_PRODUCT',
   ORDER_DELIVERY = 'ORDER_DELIVERY',
   PLAYER_TACKLE = 'PLAYER_TACKLE',
+  BUY_TEAM_UPGRADE = 'BUY_TEAM_UPGRADE',
+  BUY_PERSONAL_SKILL = 'BUY_PERSONAL_SKILL',
+  PLAYER_ATTACK = 'PLAYER_ATTACK',
+  SKIP_PHASE = 'SKIP_PHASE',
 }
 
 export enum ServerOpCode {
@@ -24,6 +28,10 @@ export enum ServerOpCode {
   ACTION_REJECTED = 'ACTION_REJECTED',
   NOTIFICATION = 'NOTIFICATION',
   PLAYER_TACKLED = 'PLAYER_TACKLED',
+  SHIFT_STATE_CHANGED = 'SHIFT_STATE_CHANGED',
+  UPGRADES_CHANGED = 'UPGRADES_CHANGED',
+  MONSTER_DEFEATED = 'MONSTER_DEFEATED',
+  SHIFT_SUMMARY = 'SHIFT_SUMMARY',
 }
 
 // Client -> Server
@@ -83,6 +91,19 @@ export interface PlayerTacklePayload {
   duration?: number;
 }
 
+export interface BuyTeamUpgradePayload {
+  upgradeId: string;
+}
+
+export interface BuyPersonalSkillPayload {
+  skillId: string;
+}
+
+export interface PlayerAttackPayload {
+  hitDirection: Vector3D;
+  position?: Vector3D;
+}
+
 export type ClientMessage =
   | { op: ClientOpCode.JOIN_ROOM; data: JoinRoomPayload }
   | { op: ClientOpCode.LEAVE_ROOM }
@@ -93,7 +114,11 @@ export type ClientMessage =
   | { op: ClientOpCode.INTERACT_PLACE_PRODUCT; data: InteractPlaceProductPayload }
   | { op: ClientOpCode.INTERACT_TAKE_PRODUCT; data: InteractTakeProductPayload }
   | { op: ClientOpCode.ORDER_DELIVERY; data: OrderDeliveryPayload }
-  | { op: ClientOpCode.PLAYER_TACKLE; data: PlayerTacklePayload };
+  | { op: ClientOpCode.PLAYER_TACKLE; data: PlayerTacklePayload }
+  | { op: ClientOpCode.BUY_TEAM_UPGRADE; data: BuyTeamUpgradePayload }
+  | { op: ClientOpCode.BUY_PERSONAL_SKILL; data: BuyPersonalSkillPayload }
+  | { op: ClientOpCode.PLAYER_ATTACK; data: PlayerAttackPayload }
+  | { op: ClientOpCode.SKIP_PHASE };
 
 // Server -> Client
 export interface InitRoomPayload {
@@ -115,6 +140,26 @@ export interface WorldTickPayload {
     position: Vector3D;
     rotation: { x: number; y: number; z: number; w: number };
   }>;
+  customers?: Record<string, {
+    position: Vector3D;
+    rotationY: number;
+    state: string;
+    heldProductId: string | null;
+  }>;
+  monsters?: Record<string, {
+    position: Vector3D;
+    rotationY: number;
+    state: string;
+    health: number;
+    maxHealth: number;
+    type: string;
+  }>;
+  cleanerBots?: Record<string, {
+    position: Vector3D;
+    rotationY: number;
+    state: string;
+  }>;
+  shiftTimeRemaining?: number;
 }
 
 export interface ActionRejectedPayload {
@@ -127,6 +172,26 @@ export interface NotificationPayload {
   message: string;
 }
 
+export interface UpgradesChangedPayload {
+  teamUnlocks: string[];
+  playerSkills: Record<string, string[]>;
+  personalCash: Record<string, number>;
+}
+
+export interface MonsterDefeatedPayload {
+  monsterId: string;
+  defeatedByPlayerId?: string;
+  bonusCash: number;
+}
+
+export interface ShiftSummaryPayload {
+  shiftNumber: number;
+  revenue: number;
+  customersServed: number;
+  monstersRepelled: number;
+  salaryBonus: number;
+}
+
 export type ServerMessage =
   | { op: ServerOpCode.INIT_ROOM; data: InitRoomPayload }
   | { op: ServerOpCode.PLAYER_JOINED; data: PlayerState }
@@ -137,4 +202,8 @@ export type ServerMessage =
   | { op: ServerOpCode.STORE_ECONOMY_CHANGED; data: { storeMoney: number; storeLevel: number } }
   | { op: ServerOpCode.ACTION_REJECTED; data: ActionRejectedPayload }
   | { op: ServerOpCode.NOTIFICATION; data: NotificationPayload }
-  | { op: ServerOpCode.PLAYER_TACKLED; data: PlayerTacklePayload };
+  | { op: ServerOpCode.PLAYER_TACKLED; data: PlayerTacklePayload }
+  | { op: ServerOpCode.SHIFT_STATE_CHANGED; data: import('./types.js').ShiftState }
+  | { op: ServerOpCode.UPGRADES_CHANGED; data: UpgradesChangedPayload }
+  | { op: ServerOpCode.MONSTER_DEFEATED; data: MonsterDefeatedPayload }
+  | { op: ServerOpCode.SHIFT_SUMMARY; data: ShiftSummaryPayload };

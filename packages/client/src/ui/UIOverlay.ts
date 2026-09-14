@@ -1,7 +1,17 @@
-import { NotificationPayload, PRODUCTS } from '@colis/shared';
+import {
+  NotificationPayload,
+  PERSONAL_SKILLS,
+  PRODUCTS,
+  ShiftState,
+  ShiftSummaryPayload,
+  TEAM_UPGRADES,
+} from '@colis/shared';
 
 export class UIOverlay {
   private elMoney: HTMLElement;
+  private elPersonalCash: HTMLElement;
+  private elShiftBadge: HTMLElement;
+  private elShiftPhaseText: HTMLElement;
   private elRoom: HTMLElement;
   private elPlayers: HTMLElement;
   private elHeldCard: HTMLElement;
@@ -21,12 +31,38 @@ export class UIOverlay {
   private elStaminaPct: HTMLElement;
   private elStaminaFill: HTMLElement;
 
+  // Upgrades & Skills Modal
+  private elUpgradesModal: HTMLElement;
+  private elUpgradesTeamGrid: HTMLElement;
+  private elUpgradesPersonalGrid: HTMLElement;
+  private elTabTeam: HTMLElement;
+  private elTabPersonal: HTMLElement;
+
+  // Shift Summary Modal
+  private elSummaryModal: HTMLElement;
+  private elSummaryTitle: HTMLElement;
+  private elSummaryCustomers: HTMLElement;
+  private elSummaryRevenue: HTMLElement;
+  private elSummaryMonsters: HTMLElement;
+  private elSummarySalary: HTMLElement;
+
   private onOrderCallback?: (productId: string, quantity: number) => void;
   private onChangeRoomCallback?: (roomId: string) => void;
+  private onBuyTeamUpgradeCallback?: (upgradeId: string) => void;
+  private onBuyPersonalSkillCallback?: (skillId: string) => void;
+  private onSkipPhaseCallback?: () => void;
+
+  private currentTeamUnlocks: string[] = [];
+  private currentPersonalSkills: string[] = [];
+  private currentStoreMoney: number = 1500;
+  private currentPersonalCash: number = 50;
 
   constructor() {
     this.elMoney = document.getElementById('hud-money')!;
-    this.elRoom = document.getElementById('hud-room')!;
+    this.elPersonalCash = document.getElementById('hud-personal-cash')!;
+    this.elShiftBadge = document.getElementById('shift-badge')!;
+    this.elShiftPhaseText = document.getElementById('shift-phase-text')!;
+    this.elRoom = document.getElementById('hud-room') || document.createElement('div');
     this.elPlayers = document.getElementById('hud-players')!;
     this.elHeldCard = document.getElementById('held-box-card')!;
     this.elHeldName = document.getElementById('held-product-name')!;
@@ -45,6 +81,21 @@ export class UIOverlay {
     this.elStaminaPct = document.getElementById('stamina-pct')!;
     this.elStaminaFill = document.getElementById('stamina-fill')!;
 
+    // Upgrades
+    this.elUpgradesModal = document.getElementById('upgrades-modal')!;
+    this.elUpgradesTeamGrid = document.getElementById('upgrades-team-container')!;
+    this.elUpgradesPersonalGrid = document.getElementById('upgrades-personal-container')!;
+    this.elTabTeam = document.getElementById('tab-btn-team')!;
+    this.elTabPersonal = document.getElementById('tab-btn-personal')!;
+
+    // Summary
+    this.elSummaryModal = document.getElementById('shift-summary-modal')!;
+    this.elSummaryTitle = document.getElementById('summary-title')!;
+    this.elSummaryCustomers = document.getElementById('summary-customers')!;
+    this.elSummaryRevenue = document.getElementById('summary-revenue')!;
+    this.elSummaryMonsters = document.getElementById('summary-monsters')!;
+    this.elSummarySalary = document.getElementById('summary-salary')!;
+
     this.setupEventListeners();
     this.renderDeliveryProducts();
   }
@@ -53,6 +104,10 @@ export class UIOverlay {
     const btnOrder = document.getElementById('btn-order-delivery');
     const btnCloseModal = document.getElementById('modal-close-btn');
     const btnChangeRoom = document.getElementById('btn-change-room');
+    const btnSkills = document.getElementById('btn-skills-upgrades');
+    const btnCloseUpgrades = document.getElementById('upgrades-close-btn');
+    const btnSkipPhase = document.getElementById('btn-skip-phase');
+    const btnCloseSummary = document.getElementById('btn-close-summary');
 
     btnOrder?.addEventListener('click', () => {
       this.elModal.style.display = 'flex';
@@ -68,6 +123,45 @@ export class UIOverlay {
       }
     });
 
+    btnSkills?.addEventListener('click', () => {
+      this.toggleUpgradesModal();
+    });
+
+    btnCloseUpgrades?.addEventListener('click', () => {
+      this.toggleUpgradesModal(false);
+    });
+
+    this.elUpgradesModal.addEventListener('click', (e) => {
+      if (e.target === this.elUpgradesModal) {
+        this.toggleUpgradesModal(false);
+      }
+    });
+
+    // Upgrades Tabs
+    this.elTabTeam.addEventListener('click', () => {
+      this.elTabTeam.style.background = 'var(--primary)';
+      this.elTabPersonal.style.background = 'rgba(255,255,255,0.1)';
+      this.elUpgradesTeamGrid.style.display = 'grid';
+      this.elUpgradesPersonalGrid.style.display = 'none';
+    });
+
+    this.elTabPersonal.addEventListener('click', () => {
+      this.elTabPersonal.style.background = 'var(--primary)';
+      this.elTabTeam.style.background = 'rgba(255,255,255,0.1)';
+      this.elUpgradesPersonalGrid.style.display = 'grid';
+      this.elUpgradesTeamGrid.style.display = 'none';
+    });
+
+    btnSkipPhase?.addEventListener('click', () => {
+      if (this.onSkipPhaseCallback) {
+        this.onSkipPhaseCallback();
+      }
+    });
+
+    btnCloseSummary?.addEventListener('click', () => {
+      this.elSummaryModal.style.display = 'none';
+    });
+
     btnChangeRoom?.addEventListener('click', () => {
       const room = prompt('Введите ID комнаты или название магазина:', 'store-coop-1');
       if (room && this.onChangeRoomCallback) {
@@ -79,9 +173,147 @@ export class UIOverlay {
   public setCallbacks(callbacks: {
     onOrder: (productId: string, quantity: number) => void;
     onChangeRoom: (roomId: string) => void;
+    onBuyTeamUpgrade?: (upgradeId: string) => void;
+    onBuyPersonalSkill?: (skillId: string) => void;
+    onSkipPhase?: () => void;
   }): void {
     this.onOrderCallback = callbacks.onOrder;
     this.onChangeRoomCallback = callbacks.onChangeRoom;
+    this.onBuyTeamUpgradeCallback = callbacks.onBuyTeamUpgrade;
+    this.onBuyPersonalSkillCallback = callbacks.onBuyPersonalSkill;
+    this.onSkipPhaseCallback = callbacks.onSkipPhase;
+  }
+
+  public toggleUpgradesModal(open?: boolean): void {
+    const shouldOpen = open !== undefined ? open : this.elUpgradesModal.style.display !== 'flex';
+    this.elUpgradesModal.style.display = shouldOpen ? 'flex' : 'none';
+    if (shouldOpen) {
+      this.renderUpgrades();
+    }
+  }
+
+  public isUpgradesModalOpen(): boolean {
+    return this.elUpgradesModal.style.display === 'flex';
+  }
+
+  public updateMoney(amount: number): void {
+    this.currentStoreMoney = amount;
+    this.elMoney.textContent = `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (this.isUpgradesModalOpen()) this.renderUpgrades();
+  }
+
+  public updatePersonalCash(amount: number): void {
+    this.currentPersonalCash = amount;
+    this.elPersonalCash.textContent = `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (this.isUpgradesModalOpen()) this.renderUpgrades();
+  }
+
+  public updateShift(shift: ShiftState): void {
+    this.elShiftBadge.textContent = `СМЕНА ${shift.shiftNumber}`;
+
+    const minutes = Math.floor(shift.phaseTimeRemaining / 60);
+    const seconds = Math.floor(shift.phaseTimeRemaining % 60);
+    const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+    if (shift.phase === 'DAY') {
+      this.elShiftPhaseText.innerHTML = `☀️ ДЕНЬ (${timeStr})`;
+      this.elShiftPhaseText.style.color = '#facc15';
+    } else if (shift.phase === 'EVENING') {
+      this.elShiftPhaseText.innerHTML = `🌆 ВЕЧЕР (${timeStr})`;
+      this.elShiftPhaseText.style.color = '#f97316';
+    } else {
+      this.elShiftPhaseText.innerHTML = `🌑 НОЧЬ (${timeStr})`;
+      this.elShiftPhaseText.style.color = '#ef4444';
+    }
+  }
+
+  public showShiftSummary(summary: ShiftSummaryPayload): void {
+    this.elSummaryTitle.textContent = `🏆 СМЕНА ${summary.shiftNumber} ЗАВЕРШЕНА!`;
+    this.elSummaryCustomers.textContent = `${summary.customersServed} чел.`;
+    this.elSummaryRevenue.textContent = `+$${summary.revenue.toFixed(2)}`;
+    this.elSummaryMonsters.textContent = `${summary.monstersRepelled} шт.`;
+    this.elSummarySalary.textContent = `+$${summary.salaryBonus.toFixed(2)}`;
+    this.elSummaryModal.style.display = 'flex';
+  }
+
+  public setUpgradesData(teamUnlocks: string[], personalSkills: string[]): void {
+    this.currentTeamUnlocks = teamUnlocks;
+    this.currentPersonalSkills = personalSkills;
+    if (this.isUpgradesModalOpen()) this.renderUpgrades();
+  }
+
+  private renderUpgrades(): void {
+    // 1. Team Upgrades
+    this.elUpgradesTeamGrid.innerHTML = '';
+    for (const upgrade of Object.values(TEAM_UPGRADES)) {
+      const isUnlocked = this.currentTeamUnlocks.includes(upgrade.id);
+      const canAfford = this.currentStoreMoney >= upgrade.cost;
+
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 24px;">${upgrade.icon}</span>
+          <span class="product-card-title">${upgrade.name}</span>
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); min-height: 38px;">
+          ${upgrade.description}
+        </p>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+          <span class="product-card-price">$${upgrade.cost}</span>
+          <button class="btn" style="padding: 4px 12px; font-size: 0.8rem; background: ${isUnlocked ? '#10b981' : canAfford ? 'var(--primary)' : '#475569'}; cursor: ${isUnlocked ? 'default' : 'pointer'};" ${isUnlocked ? 'disabled' : ''}>
+            ${isUnlocked ? '✓ Куплено' : 'Купить'}
+          </button>
+        </div>
+      `;
+
+      const btn = card.querySelector('button');
+      if (!isUnlocked && btn) {
+        btn.addEventListener('click', () => {
+          if (this.onBuyTeamUpgradeCallback) {
+            this.onBuyTeamUpgradeCallback(upgrade.id);
+          }
+        });
+      }
+
+      this.elUpgradesTeamGrid.appendChild(card);
+    }
+
+    // 2. Personal Skills
+    this.elUpgradesPersonalGrid.innerHTML = '';
+    for (const skill of Object.values(PERSONAL_SKILLS)) {
+      const isLearned = this.currentPersonalSkills.includes(skill.id);
+      const canAfford = this.currentPersonalCash >= skill.cost;
+
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 24px;">${skill.icon}</span>
+          <span class="product-card-title">${skill.name}</span>
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); min-height: 38px;">
+          ${skill.description}
+        </p>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+          <span class="product-card-price" style="color: #38bdf8;">$${skill.cost}</span>
+          <button class="btn" style="padding: 4px 12px; font-size: 0.8rem; background: ${isLearned ? '#10b981' : canAfford ? '#6366f1' : '#475569'}; cursor: ${isLearned ? 'default' : 'pointer'};" ${isLearned ? 'disabled' : ''}>
+            ${isLearned ? '✓ Освоено' : 'Освоить'}
+          </button>
+        </div>
+      `;
+
+      const btn = card.querySelector('button');
+      if (!isLearned && btn) {
+        btn.addEventListener('click', () => {
+          if (this.onBuyPersonalSkillCallback) {
+            this.onBuyPersonalSkillCallback(skill.id);
+          }
+        });
+      }
+
+      this.elUpgradesPersonalGrid.appendChild(card);
+    }
   }
 
   private renderDeliveryProducts(): void {
@@ -122,12 +354,8 @@ export class UIOverlay {
     }
   }
 
-  public updateMoney(amount: number): void {
-    this.elMoney.textContent = `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
-
   public updateRoomInfo(roomId: string, playerCount: number): void {
-    this.elRoom.textContent = roomId;
+    if (this.elRoom) this.elRoom.textContent = roomId;
     this.elPlayers.textContent = `${playerCount} чел.`;
   }
 

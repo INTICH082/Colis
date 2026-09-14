@@ -512,15 +512,19 @@
     <div class="hud-panel">
       <div class="brand-badge">
         <div class="brand-icon">📦</div>
-        <span>COLIS SIMULATOR</span>
+        <span>COLIS</span>
       </div>
       <div class="stat-chip">
-        <span class="stat-label">Казна магазина</span>
+        <span class="stat-label">Казна</span>
         <span class="stat-value money" id="hud-money">$1,500.00</span>
       </div>
       <div class="stat-chip">
-        <span class="stat-label">Сессия / Комната</span>
-        <span class="stat-value" id="hud-room">store-main</span>
+        <span class="stat-label">Зарплата</span>
+        <span class="stat-value" id="hud-personal-cash" style="color: #38bdf8;">$50.00</span>
+      </div>
+      <div class="stat-chip" style="border-left: 1px solid var(--panel-border); padding-left: 14px;">
+        <span class="stat-label" id="shift-badge">СМЕНА 1</span>
+        <span class="stat-value" id="shift-phase-text" style="color: #facc15; font-size: 1.05rem;">☀️ ДЕНЬ (01:30)</span>
       </div>
       <div class="stat-chip">
         <span class="stat-label">Онлайн</span>
@@ -529,8 +533,14 @@
     </div>
 
     <div class="hud-panel">
+      <button class="btn" id="btn-skills-upgrades" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">
+        ⭐ [U] Навыки и открытия
+      </button>
       <button class="btn btn-accent" id="btn-order-delivery">
         🚚 Заказ поставки
+      </button>
+      <button class="btn" id="btn-skip-phase" title="Ускорить смену фазы">
+        ⏩ След. фаза
       </button>
       <button class="btn" id="btn-change-room">
         🚪 Сменить комнату
@@ -591,14 +601,14 @@
     </div>
 
     <div class="controls-cheatsheet">
-      <span><span class="key-badge">WASD</span> Перемещение</span>
-      <span><span class="key-badge">Shift</span> Бег</span>
-      <span><span class="key-badge">Мышь</span> Наведение в изометрии</span>
-      <span><span class="key-badge">E</span> Взять коробку</span>
+      <span><span class="key-badge">WASD</span> Бег</span>
+      <span><span class="key-badge">E</span> Взять / Положить</span>
       <span><span class="key-badge">R</span> Открыть коробку</span>
-      <span><span class="key-badge">ЛКМ</span> Выставить на полку</span>
-      <span><span class="key-badge">ПКМ</span> Забрать с полки</span>
-      <span><span class="key-badge">G</span> Положить / Зажать: Бросок</span>
+      <span><span class="key-badge">ЛКМ</span> Выставить / Атака</span>
+      <span><span class="key-badge">ПКМ</span> Забрать</span>
+      <span><span class="key-badge">G</span> Зажать: Бросок</span>
+      <span><span class="key-badge">F</span> Удар оружием</span>
+      <span><span class="key-badge">U</span> Открытия и навыки</span>
     </div>
   </div>
 
@@ -616,6 +626,57 @@
         Заказанные коробки будут немедленно доставлены в зону разгрузки склада.
       </p>
       <div class="product-grid" id="delivery-product-grid"></div>
+    </div>
+  </div>
+
+  <!-- Upgrades and Skills Modal -->
+  <div class="modal-backdrop" id="upgrades-modal">
+    <div class="modal-window" style="width: 780px;">
+      <div class="modal-header">
+        <h2>⭐ Открытия магазина и Личные навыки [U]</h2>
+        <button class="close-btn" id="upgrades-close-btn">&times;</button>
+      </div>
+      <div style="display: flex; gap: 12px; border-bottom: 1px solid var(--panel-border); padding-bottom: 8px;">
+        <button class="btn" id="tab-btn-team" style="background: var(--primary);">
+          🏢 Командные открытия (Казна)
+        </button>
+        <button class="btn" id="tab-btn-personal" style="background: rgba(255,255,255,0.1);">
+          👤 Личные навыки сотрудника (Зарплата)
+        </button>
+      </div>
+      <div id="upgrades-team-container" class="product-grid"></div>
+      <div id="upgrades-personal-container" class="product-grid" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- Shift Summary Modal -->
+  <div class="modal-backdrop" id="shift-summary-modal">
+    <div class="modal-window" style="width: 480px; text-align: center; gap: 16px;">
+      <h2 id="summary-title" style="color: #facc15;">☀️ СМЕНА ЗАВЕРШЕНА!</h2>
+      <p id="summary-subtitle" style="font-size: 0.9rem; color: var(--text-muted);">
+        Отчёт о работе супермаркета за прошедшие сутки
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.04); padding: 16px; border-radius: 10px; text-align: left;">
+        <div style="display: flex; justify-content: space-between;">
+          <span>🛒 Обслужено покупателей:</span>
+          <b id="summary-customers">0 чел.</b>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span>💵 Дневная выручка магазина:</span>
+          <b id="summary-revenue" style="color: #4ade80;">+$0.00</b>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span>⚔️ Ночных монстров отражено:</span>
+          <b id="summary-monsters">0 шт.</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+          <span>💰 Ваша премия за смену:</span>
+          <b id="summary-salary" style="color: #38bdf8; font-size: 1.15rem;">+$0.00</b>
+        </div>
+      </div>
+      <button class="btn btn-accent" id="btn-close-summary" style="justify-content: center; width: 100%; padding: 10px;">
+        Продолжить работу
+      </button>
     </div>
   </div>
 

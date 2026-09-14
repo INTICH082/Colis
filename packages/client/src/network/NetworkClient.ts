@@ -14,6 +14,10 @@ import {
   ShelfState,
   Vector3D,
   WorldTickPayload,
+  ShiftState,
+  UpgradesChangedPayload,
+  MonsterDefeatedPayload,
+  ShiftSummaryPayload,
 } from '@colis/shared';
 
 export interface NetworkCallbacks {
@@ -27,6 +31,10 @@ export interface NetworkCallbacks {
   onNotification: (notif: NotificationPayload) => void;
   onConnectionStatus: (connected: boolean) => void;
   onPlayerTackled?: (data: PlayerTacklePayload) => void;
+  onShiftChanged?: (shift: ShiftState) => void;
+  onUpgradesChanged?: (upgrades: UpgradesChangedPayload) => void;
+  onMonsterDefeated?: (data: MonsterDefeatedPayload) => void;
+  onShiftSummary?: (data: ShiftSummaryPayload) => void;
 }
 
 export class NetworkClient {
@@ -146,7 +154,46 @@ export class NetworkClient {
       case ServerOpCode.PLAYER_TACKLED:
         this.callbacks.onPlayerTackled?.(msg.data);
         break;
+      case ServerOpCode.SHIFT_STATE_CHANGED:
+        this.callbacks.onShiftChanged?.(msg.data);
+        break;
+      case ServerOpCode.UPGRADES_CHANGED:
+        this.callbacks.onUpgradesChanged?.(msg.data);
+        break;
+      case ServerOpCode.MONSTER_DEFEATED:
+        this.callbacks.onMonsterDefeated?.(msg.data);
+        break;
+      case ServerOpCode.SHIFT_SUMMARY:
+        this.callbacks.onShiftSummary?.(msg.data);
+        break;
     }
+  }
+
+  public sendBuyTeamUpgrade(upgradeId: string): void {
+    this.send({
+      op: ClientOpCode.BUY_TEAM_UPGRADE,
+      data: { upgradeId },
+    });
+  }
+
+  public sendBuyPersonalSkill(skillId: string): void {
+    this.send({
+      op: ClientOpCode.BUY_PERSONAL_SKILL,
+      data: { skillId },
+    });
+  }
+
+  public sendPlayerAttack(hitDirection: Vector3D): void {
+    this.send({
+      op: ClientOpCode.PLAYER_ATTACK,
+      data: { hitDirection },
+    });
+  }
+
+  public sendSkipPhase(): void {
+    this.send({
+      op: ClientOpCode.SKIP_PHASE,
+    });
   }
 
   public sendPlayerTackle(victimId: string, impulseX: number, impulseZ: number, force: number = 1.0, duration: number = 3.0): void {
